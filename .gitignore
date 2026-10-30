@@ -1,0 +1,20 @@
+# 依赖与构建产物
+node_modules/
+dist/
+target/
+
+# 运行时数据
+xvideo-data/
+
+# 工作区本地数据
+.workbuddy/
+
+# 环境与日志
+.env
+*.log
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
