@@ -1,0 +1,18 @@
+[package]
+name = "x-video"
+version.workspace = true
+edition.workspace = true
+description = "X-Video 桌面播放器"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+xv-core = { path = "../crates/xv-core" }
+xv-server = { path = "../crates/xv-server" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
