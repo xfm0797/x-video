@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "title": "X-Video 播放器",
     "windows": [
       {
         "title": "X-Video 播放器",
