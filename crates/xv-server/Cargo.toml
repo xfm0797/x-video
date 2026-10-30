@@ -1,0 +1,20 @@
+[package]
+name = "xv-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "xv-server"
+path = "src/main.rs"
+
+[dependencies]
+xv-core = { path = "../xv-core" }
+tokio.workspace = true
+axum.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+percent-encoding.workspace = true
+tower-http = { version = "0.6", features = ["cors", "fs"] }
