@@ -9,12 +9,12 @@ fn main() {
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(21600);
-        let result = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .and_then(|rt| {
-                rt.block_on(async { xv_server::serve(port).await })
-            });
+        let result: anyhow::Result<()> = (|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(xv_server::serve(port))
+        })();
         if let Err(e) = result {
             eprintln!("内嵌服务启动失败: {e:#}");
         }
