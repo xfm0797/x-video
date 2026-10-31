@@ -124,7 +124,7 @@ fn parse_vod_list(json: &serde_json::Value) -> Vec<VodItem> {
     out
 }
 
-fn parse_detail(v: &serde_json::Value) -> Result<VodDetail> {
+pub fn parse_detail(v: &serde_json::Value) -> Result<VodDetail> {
     let play_from = v.get("vod_play_from").map(vstr).unwrap_or_default();
     let play_url = v.get("vod_play_url").map(vstr).unwrap_or_default();
 

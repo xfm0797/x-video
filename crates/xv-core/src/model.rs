@@ -170,3 +170,37 @@ pub struct PlayUrl {
     pub kind: String, // hls | mp4 | other
     pub raw: String,
 }
+
+/// 聚合搜索结果条目（带来源站点标识）
+#[derive(Debug, Clone, Serialize)]
+pub struct AggItem {
+    pub source_id: String,
+    pub site_key: String,
+    pub site_name: String,
+    pub vod_id: String,
+    pub vod_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vod_pic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vod_remarks: Option<String>,
+}
+
+/// 单个站点的搜索失败信息
+#[derive(Debug, Clone, Serialize)]
+pub struct AggFailure {
+    pub site_name: String,
+    pub site_key: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AggResult {
+    pub items: Vec<AggItem>,
+    pub failures: Vec<AggFailure>,
+    /// 参与搜索的站点数
+    pub site_total: usize,
+    /// 因脚本类型不支持而跳过的站点数
+    pub site_skipped: usize,
+    /// 有结果的站点数
+    pub site_hit: usize,
+}

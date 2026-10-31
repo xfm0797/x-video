@@ -1,14 +1,20 @@
 use crate::model::*;
-use crate::sources::{jx, live_parse, tvbox as tvbox_mod};
+use crate::sources::{jx, live_parse, spider, tvbox as tvbox_mod};
 use crate::store;
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// jx 解析结果缓存有效期（秒）
 const JX_CACHE_TTL: u64 = 600;
 /// 单个解析接口的超时（秒）
 const JX_STEP_TIMEOUT: u64 = 15;
+/// 单次脚本调用超时（秒）
+const SPIDER_TIMEOUT: u64 = 45;
+/// 聚合搜索中单个站点的超时（秒）
+const SEARCH_TIMEOUT: u64 = 15;
+/// 聚合搜索默认参与站点数
+pub const DEFAULT_SEARCH_SITES: usize = 40;
 
 pub struct Core {
     pub http: reqwest::Client,
@@ -20,6 +26,8 @@ pub struct Core {
     pub tvbox_cache: Mutex<HashMap<String, TvBoxConfig>>,
     /// 原始播放页地址 -> (解析后的直链, 时间戳)
     pub jx_cache: Mutex<HashMap<String, (String, u64)>>,
+    /// spider 脚本地址 -> 源码
+    pub spider_js_cache: Mutex<HashMap<String, String>>,
     /// 本地代理基地址，如 http://127.0.0.1:21600
     pub proxy_base: String,
 }
@@ -40,11 +48,17 @@ impl Core {
             live_cache: Mutex::new(HashMap::new()),
             tvbox_cache: Mutex::new(HashMap::new()),
             jx_cache: Mutex::new(HashMap::new()),
+            spider_js_cache: Mutex::new(HashMap::new()),
             proxy_base,
         }
     }
 
     async fn fetch_text(&self, url: &str, headers: Option<&serde_json::Value>) -> Result<String> {
+        // 本地文件：file:///E:/x.json 或直接给路径
+        if let Some(path) = local_path(url) {
+            return std::fs::read_to_string(&path)
+                .with_context(|| format!("读取本地文件失败: {path}"));
+        }
         let mut rb = self.http.get(url);
         if let Some(h) = headers {
             if let Some(obj) = h.as_object() {
@@ -262,9 +276,144 @@ impl Core {
         })
     }
 
+    // ---------- Spider（type=3）----------
+
+    fn source_url(&self, source_id: &str) -> String {
+        self.sources
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.id == source_id)
+            .map(|s| s.url.clone())
+            .unwrap_or_default()
+    }
+
+    /// 取站点脚本，规则与 TVBox 一致：
+    /// - `api` 以 `.js` 结尾 → api 本身就是 Spider 脚本（`ext` 作为脚本配置）
+    /// - 否则 `api` 是 csp 类名，脚本优先取站点 `ext`（.js），再退到配置 `spider`（.js）
+    async fn site_js(
+        &self,
+        site: &TvBoxSite,
+        cfg: &TvBoxConfig,
+        source_url: &str,
+    ) -> Result<String> {
+        let api = site.api.trim();
+        let lower_api = api.to_ascii_lowercase();
+        let ext = site
+            .ext
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        let js_url = if lower_api.ends_with(".js") || lower_api.contains(".js?") {
+            if api.starts_with("http://")
+                || api.starts_with("https://")
+                || api.starts_with("file://")
+            {
+                api.to_string()
+            } else if api.starts_with("assets://") {
+                return Err(anyhow!("站点脚本使用 assets:// 打包资源（{api}），当前版本不支持"));
+            } else {
+                spider::join_url(source_url, api)
+            }
+        } else if ext.to_ascii_lowercase().ends_with(".js") {
+            spider::join_url(source_url, &ext)
+        } else if let Some(spider_path) = cfg
+            .spider
+            .as_ref()
+            .filter(|s| s.to_ascii_lowercase().ends_with(".js"))
+        {
+            spider::join_url(source_url, spider_path)
+        } else {
+            return Err(anyhow!(
+                "该站点走 Jar Spider（Java 实现），桌面端无法执行；需要 api 为 .js 或 ext 为 .js 的站点"
+            ));
+        };
+
+        if let Some(js) = self.spider_js_cache.lock().unwrap().get(&js_url).cloned() {
+            return Ok(js);
+        }
+        let js = self.fetch_text(&js_url, None).await?;
+        if js.trim().is_empty() {
+            return Err(anyhow!("站点脚本为空: {js_url}"));
+        }
+        if is_esm_script(&js) {
+            return Err(anyhow!(
+                "脚本是 ES Module（drpy2 等引擎），当前沙箱只支持传统脚本"
+            ));
+        }
+        self.spider_js_cache
+            .lock()
+            .unwrap()
+            .insert(js_url, js.clone());
+        Ok(js)
+    }
+
+    /// 站点脚本运行前的环境变量（TVBox 里脚本可读 `ext` / `key`）
+    fn site_env(site: &TvBoxSite) -> String {
+        let ext = match site.ext.as_ref() {
+            Some(serde_json::Value::String(s)) => serde_json::to_string(s).unwrap_or_default(),
+            Some(other) => other.to_string(),
+            None => "null".to_string(),
+        };
+        format!(
+            "var ext = {ext}; var KEY = {}; var key = KEY;\n",
+            json_q(&site.key)
+        )
+    }
+
+    /// 在沙箱里跑一个站点方法，返回 JSON
+    async fn spider_call(
+        &self,
+        js: &str,
+        base: &str,
+        env: &str,
+        method: &str,
+        args: &str,
+    ) -> Result<serde_json::Value> {
+        let (js, base, env, method, args) = (
+            js.to_string(),
+            base.to_string(),
+            env.to_string(),
+            method.to_string(),
+            args.to_string(),
+        );
+        let handle = tokio::task::spawn_blocking(move || {
+            spider::call_with_env(&js, &base, &env, &method, &args)
+        });
+        match tokio::time::timeout(std::time::Duration::from_secs(SPIDER_TIMEOUT), handle).await {
+            Ok(Ok(Ok(text))) => {
+                serde_json::from_str(&text).map_err(|e| anyhow!("脚本返回非 JSON: {e}"))
+            }
+            Ok(Ok(Err(e))) => Err(e),
+            Ok(Err(join_err)) => Err(anyhow!("脚本线程异常: {join_err}")),
+            Err(_) => Err(anyhow!("脚本执行超时（{SPIDER_TIMEOUT}s）")),
+        }
+    }
+
+    async fn spider_ready(&self, source_id: &str, site_key: &str) -> Result<(TvBoxSite, String, String)> {
+        let cfg = self.ensure_tvbox(source_id).await?;
+        let site = cfg
+            .sites
+            .iter()
+            .find(|s| s.key == site_key)
+            .cloned()
+            .ok_or_else(|| anyhow!("站点不存在: {site_key}"))?;
+        let base = self.source_url(source_id);
+        let js = self.site_js(&site, &cfg, &base).await?;
+        Ok((site, js, base))
+    }
+
     pub async fn cms_home(&self, source_id: &str, site_key: &str) -> Result<Vec<VodCategory>> {
         self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
+        if site.site_type == 3 {
+            let (_site, js, base) = self.spider_ready(source_id, site_key).await?;
+            let v = self.spider_call(&js, &base, &Self::site_env(&site), "homeContent", "false").await?;
+            return Ok(parse_spider_classes(&v));
+        }
         self.cms_client(&site)?.home().await
     }
 
@@ -277,19 +426,183 @@ impl Core {
     ) -> Result<(Vec<VodItem>, u32, u32)> {
         self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
+        if site.site_type == 3 {
+            let (_site, js, base) = self.spider_ready(source_id, site_key).await?;
+            let args = format!("{}, {}, false, {{}}", json_q(tid), pg);
+            let v = self
+                .spider_call(&js, &base, &Self::site_env(&site), "categoryContent", &args)
+                .await?;
+            let items = parse_spider_list(&v);
+            let page_count = v.get("pagecount").and_then(|x| x.as_u64()).unwrap_or(1) as u32;
+            let total = v.get("total").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            return Ok((items, page_count.max(1), total));
+        }
         self.cms_client(&site)?.list(tid, pg).await
     }
 
-    pub async fn cms_detail(&self, source_id: &str, site_key: &str, vod_id: &str) -> Result<VodDetail> {
+    pub async fn cms_detail(
+        &self,
+        source_id: &str,
+        site_key: &str,
+        vod_id: &str,
+    ) -> Result<VodDetail> {
         self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
+        if site.site_type == 3 {
+            let (_site, js, base) = self.spider_ready(source_id, site_key).await?;
+            let args = format!("[{}]", json_q(vod_id));
+            let v = self
+                .spider_call(&js, &base, &Self::site_env(&site), "detailContent", &args)
+                .await?;
+            let first = v
+                .get("list")
+                .and_then(|x| x.as_array())
+                .and_then(|a| a.first())
+                .cloned()
+                .ok_or_else(|| anyhow!("站点未返回详情: {vod_id}"))?;
+            let mut detail = tvbox_mod::parse_detail(&first)?;
+            // 蜘蛛站点的选集是「集 id」，播放时要用 play_from 作为 flag 回调 playerContent
+            for ps in detail.play_sources.iter_mut() {
+                let flag = ps.from.clone();
+                for ep in ps.episodes.iter_mut() {
+                    if !ep.1.contains("://") {
+                        ep.1 = format!("{flag}|||{}", ep.1);
+                    }
+                }
+            }
+            return Ok(detail);
+        }
         self.cms_client(&site)?.detail(vod_id).await
     }
 
-    pub async fn cms_search(&self, source_id: &str, site_key: &str, wd: &str) -> Result<Vec<VodItem>> {
+    pub async fn cms_search(
+        &self,
+        source_id: &str,
+        site_key: &str,
+        wd: &str,
+    ) -> Result<Vec<VodItem>> {
         self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
+        if site.site_type == 3 {
+            let (_site, js, base) = self.spider_ready(source_id, site_key).await?;
+            let args = format!("{}, false", json_q(wd));
+            let v = self
+                .spider_call(&js, &base, &Self::site_env(&site), "searchContent", &args)
+                .await?;
+            return Ok(parse_spider_list(&v));
+        }
         self.cms_client(&site)?.search(wd).await
+    }
+
+    /// 聚合搜索：把关键词并发丢给所有可用站点，合并结果并记录失败原因
+    pub async fn aggregate_search(
+        self: &Arc<Self>,
+        wd: &str,
+        max_sites: usize,
+    ) -> Result<AggResult> {
+        let wd = wd.trim().to_string();
+        if wd.is_empty() {
+            return Err(anyhow!("搜索关键词为空"));
+        }
+
+        // 规划：遍历已启用的 TVBox 源，挑出可搜索的 type=1 / type=3 站点
+        let mut plan: Vec<(u8, String, String, String)> = Vec::new();
+        let mut skipped = 0usize;
+        for s in self
+            .list_sources()
+            .into_iter()
+            .filter(|s| s.enabled && s.kind == SourceKind::Tvbox)
+        {
+            let cfg = match self.ensure_tvbox(&s.id).await {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            for site in cfg.sites.iter() {
+                if plan.len() >= max_sites {
+                    break;
+                }
+                if site.searchable == Some(0) {
+                    continue;
+                }
+                if site.site_type != 1 && site.site_type != 3 {
+                    skipped += 1;
+                    continue;
+                }
+                if site.site_type == 3 && !site_runnable(site, &cfg) {
+                    skipped += 1;
+                    continue;
+                }
+                let prio = if site.site_type == 1 { 0u8 } else { 1u8 };
+                plan.push((prio, s.id.clone(), site.key.clone(), site.name.clone()));
+            }
+        }
+
+        // type=1 JSON 接口最稳，优先占位
+
+        plan.sort_by_key(|(prio, _, _, _)| *prio);
+        let site_total = plan.len();
+        let mut set = tokio::task::JoinSet::new();
+        for (_prio, sid, skey, sname) in plan {
+            let me = self.clone();
+            let kw = wd.clone();
+            let key = skey.clone();
+            set.spawn(async move {
+                let fut = me.cms_search(&sid, &skey, &kw);
+                let res = tokio::time::timeout(std::time::Duration::from_secs(SEARCH_TIMEOUT), fut).await;
+                (sid, key, sname, res)
+            });
+        }
+
+        let mut items: Vec<AggItem> = Vec::new();
+        let mut failures: Vec<AggFailure> = Vec::new();
+        let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+        let mut site_hit = 0usize;
+
+        while let Some(joined) = set.join_next().await {
+            let Ok((sid, skey, sname, res)) = joined else {
+                continue;
+            };
+            match res {
+                Ok(Ok(list)) => {
+                    if list.is_empty() {
+                        continue;
+                    }
+                    site_hit += 1;
+                    for v in list {
+                        if !seen.insert((sid.clone(), format!("{skey}:{}", v.vod_id))) {
+                            continue;
+                        }
+                        items.push(AggItem {
+                            source_id: sid.clone(),
+                            site_key: skey.clone(),
+                            site_name: sname.clone(),
+                            vod_id: v.vod_id,
+                            vod_name: v.vod_name,
+                            vod_pic: v.vod_pic,
+                            vod_remarks: v.vod_remarks,
+                        });
+                    }
+                }
+                Ok(Err(e)) => failures.push(AggFailure {
+                    site_name: sname,
+                    site_key: skey,
+                    reason: format!("{e:#}"),
+                }),
+                Err(_) => failures.push(AggFailure {
+                    site_name: sname,
+                    site_key: skey,
+                    reason: format!("超时（{SEARCH_TIMEOUT}s）"),
+                }),
+            }
+        }
+
+        Ok(AggResult {
+            items,
+            failures,
+            site_total,
+            site_skipped: skipped,
+            site_hit,
+        })
     }
 
     /// 解析最终播放地址：必要时走 jx 网页解析，再把结果包上本地代理
@@ -302,6 +615,39 @@ impl Core {
         self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
         let headers = site.header.clone();
+
+        // 蜘蛛站点：选集地址形如 `flag|||集id`，需回调 playerContent
+        if site.site_type == 3 && raw_url.contains("|||") {
+            let (flag, ep_id) = raw_url.split_once("|||").unwrap_or((raw_url, ""));
+            let cfg = self.ensure_tvbox(source_id).await?;
+            let base = self.source_url(source_id);
+            let js = self.site_js(&site, &cfg, &base).await?;
+            let args = format!("{}, {}, []", json_q(flag), json_q(ep_id));
+            let v = self
+                .spider_call(&js, &base, &Self::site_env(&site), "playerContent", &args)
+                .await?;
+            let url = v
+                .get("url")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if url.is_empty() {
+                return Err(anyhow!("站点未返回播放地址"));
+            }
+            let parse = v.get("parse").and_then(|x| x.as_u64()).unwrap_or(0);
+            let hdr = v
+                .get("header")
+                .filter(|h| h.is_object())
+                .cloned()
+                .or(headers.clone());
+            let final_url = if parse == 1 {
+                self.jx_resolve(&site, &cfg, &url).await?
+            } else {
+                url
+            };
+            return self.build_play_url(&final_url, hdr.as_ref());
+        }
 
         // 已是直链：直接代理
         if jx::is_media_url(raw_url) {
@@ -516,4 +862,109 @@ fn urlencode(s: &str) -> String {
         .remove(b'_')
         .remove(b'.');
     percent_encoding::utf8_percent_encode(s, SET).to_string()
+}
+
+fn json_q(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn parse_spider_classes(v: &serde_json::Value) -> Vec<VodCategory> {
+    let mut out = Vec::new();
+    if let Some(class) = v.get("class").and_then(|x| x.as_array()) {
+        for c in class {
+            let type_id = c
+                .get("type_id")
+                .map(vstr_any)
+                .unwrap_or_default();
+            let type_name = c.get("type_name").map(vstr_any).unwrap_or_default();
+            if type_id.is_empty() {
+                continue;
+            }
+            out.push(VodCategory { type_id, type_name });
+        }
+    }
+    out
+}
+
+fn parse_spider_list(v: &serde_json::Value) -> Vec<VodItem> {
+    let mut out = Vec::new();
+    if let Some(list) = v.get("list").and_then(|x| x.as_array()) {
+        for it in list {
+            let vod_id = it.get("vod_id").map(vstr_any).unwrap_or_default();
+            if vod_id.is_empty() {
+                continue;
+            }
+            out.push(VodItem {
+                vod_id,
+                vod_name: it.get("vod_name").map(vstr_any).unwrap_or_default(),
+                vod_pic: it
+                    .get("vod_pic")
+                    .map(vstr_any)
+                    .filter(|s| !s.is_empty()),
+                vod_remarks: it
+                    .get("vod_remarks")
+                    .map(vstr_any)
+                    .filter(|s| !s.is_empty()),
+            });
+        }
+    }
+    out
+}
+
+fn vstr_any(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// 把 `file://` / 裸路径转成本地路径；非本地返回 None
+fn local_path(url: &str) -> Option<String> {
+    if let Some(rest) = url.strip_prefix("file://") {
+        let p = rest.trim_start_matches('/');
+        // Windows: file:///E:/a.js -> E:/a.js
+        if p.len() > 1 && p.as_bytes()[1] == b':' {
+            return Some(p.to_string());
+        }
+        return Some(format!("/{p}"));
+    }
+    if url.starts_with('/') || (url.len() > 2 && url.as_bytes()[1] == b':') {
+        return Some(url.to_string());
+    }
+    None
+}
+
+/// type=3 站点是否能在本地 JS 沙箱里跑（jar 依赖一律判否）
+fn site_runnable(site: &TvBoxSite, cfg: &TvBoxConfig) -> bool {
+    let api = site.api.trim().to_ascii_lowercase();
+    if api.contains("drpy") {
+        // drpy2 是 ESM 引擎，Boa 无法加载
+        return false;
+    }
+    if api.ends_with(".js") || api.contains(".js?") {
+        return !api.starts_with("assets://");
+    }
+    let ext_js = site
+        .ext
+        .as_ref()
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_ascii_lowercase().ends_with(".js"))
+        .unwrap_or(false);
+    if ext_js {
+        return true;
+    }
+    cfg.spider
+        .as_ref()
+        .map(|s| s.to_ascii_lowercase().ends_with(".js"))
+        .unwrap_or(false)
+}
+
+/// 判断脚本是不是 ES Module（drpy2 等，Boa 不支持）
+fn is_esm_script(js: &str) -> bool {
+    let head = js.trim_start();
+    head.starts_with("import ")
+        || head.starts_with("export ")
+        || head[..head.len().min(400)].contains("import.meta")
 }

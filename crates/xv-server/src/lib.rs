@@ -49,6 +49,7 @@ pub async fn serve_with(listener: tokio::net::TcpListener, port: u16) -> Result<
         .route("/api/cms/{id}/{site}/list", get(cms_list))
         .route("/api/cms/{id}/{site}/detail", get(cms_detail))
         .route("/api/cms/{id}/{site}/search", get(cms_search))
+        .route("/api/search", get(agg_search))
         .route("/api/cms/{id}/{site}/play", get(cms_play))
         .route("/p", get(proxy_get))
         .fallback(get(static_files))
@@ -220,6 +221,22 @@ async fn cms_search(
     match state.core.cms_search(&id, &site, &q.wd).await {
         Ok(items) => Json(items).into_response(),
         Err(e) => error_response(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct AggSearchReq {
+    wd: String,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// 聚合搜索：并发查所有可用站点
+async fn agg_search(State(state): State<AppState>, Query(q): Query<AggSearchReq>) -> Response {
+    let limit = q.limit.unwrap_or(40).clamp(1, 200);
+    match state.core.aggregate_search(&q.wd, limit).await {
+        Ok(r) => Json(r).into_response(),
+        Err(e) => error_response(StatusCode::BAD_REQUEST, &format!("{e:#}")),
     }
 }
 
