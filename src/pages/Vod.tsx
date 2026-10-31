@@ -6,6 +6,7 @@ import {
   type VodCategory,
   type VodItem,
   type VodDetail,
+  type AggResult,
 } from "../lib/api";
 import Player from "../components/Player";
 
@@ -34,6 +35,9 @@ export default function Vod({ sources }: Props) {
   const [searchResult, setSearchResult] = useState<VodItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [agg, setAgg] = useState<AggResult | null>(null);
+  const [aggLoading, setAggLoading] = useState(false);
+  const [detailCtx, setDetailCtx] = useState<{ sid: string; skey: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,14 +90,15 @@ export default function Vod({ sources }: Props) {
       .finally(() => setLoading(false));
   }, [sourceId, siteKey, catId, pg, searchResult]);
 
-  const openDetail = async (vodId: string) => {
+  const openDetail = async (vodId: string, sid = sourceId, skey = siteKey) => {
     setLoading(true);
     setError(null);
     try {
       const d = await api.get<VodDetail>(
-        `/api/cms/${sourceId}/${siteKey}/detail?vod_id=${encodeURIComponent(vodId)}`
+        `/api/cms/${sid}/${skey}/detail?vod_id=${encodeURIComponent(vodId)}`
       );
       setDetail(d);
+      setDetailCtx({ sid, skey });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -106,14 +111,33 @@ export default function Vod({ sources }: Props) {
     setParsing(true);
     setError(null);
     try {
+      const sid = detailCtx?.sid ?? sourceId;
+      const skey = detailCtx?.skey ?? siteKey;
       const p = await api.get<{ url: string; kind: string }>(
-        `/api/cms/${sourceId}/${siteKey}/play?url=${encodeURIComponent(rawUrl)}`
+        `/api/cms/${sid}/${skey}/play?url=${encodeURIComponent(rawUrl)}`
       );
       setPlaying({ url: p.url, title: `${detail.vod_name} · ${epName}` });
     } catch (e) {
       setError(`解析失败：${(e as Error).message}`);
     } finally {
       setParsing(false);
+    }
+  };
+
+  const doAggSearch = async () => {
+    const kw = keyword.trim();
+    if (!kw) return;
+    setAggLoading(true);
+    setError(null);
+    setAgg(null);
+    setSearchResult(null);
+    try {
+      const r = await api.get<AggResult>(`/api/search?wd=${encodeURIComponent(kw)}`);
+      setAgg(r);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAggLoading(false);
     }
   };
 
@@ -151,7 +175,11 @@ export default function Vod({ sources }: Props) {
           {sites.map((s) => (
             <option key={s.key} value={s.key}>
               {s.name}
-              {s.site_type !== 1 ? `（type=${s.site_type} 暂不支持）` : ""}
+              {s.site_type === 1
+                ? ""
+                : s.site_type === 3
+                ? "（JS Spider）"
+                : `（type=${s.site_type} 暂不支持）`}
             </option>
           ))}
         </select>
@@ -163,9 +191,65 @@ export default function Vod({ sources }: Props) {
           onKeyDown={(e) => e.key === "Enter" && doSearch()}
         />
         <button className="btn" onClick={doSearch}>
-          搜索
+          本站搜索
+        </button>
+        <button className="btn primary" onClick={doAggSearch} disabled={aggLoading}>
+          {aggLoading ? "全网搜索中…" : "全网搜索"}
         </button>
       </div>
+
+      {agg && (
+        <div className="agg-panel">
+          <div className="agg-head">
+            <span className="badge">
+              「{keyword}」命中 {agg.site_hit}/{agg.site_total} 个可搜站点，共 {agg.items.length} 条
+              {agg.site_skipped > 0 ? `（${agg.site_skipped} 个 jar/drpy2 站点已跳过）` : ""}
+            </span>
+            <button className="btn ghost" onClick={() => setAgg(null)}>
+              收起
+            </button>
+          </div>
+          <div className="agg-list">
+            {agg.items.map((it) => (
+              <div
+                key={`${it.source_id}:${it.site_key}:${it.vod_id}`}
+                className="agg-item"
+                onClick={() => {
+                  setSourceId(it.source_id);
+                  setSiteKey(it.site_key);
+                  openDetail(it.vod_id, it.source_id, it.site_key);
+                }}
+              >
+                {it.vod_pic ? (
+                  <img src={it.vod_pic} alt="" loading="lazy" />
+                ) : (
+                  <div className="no-pic">无封面</div>
+                )}
+                <div className="agg-meta">
+                  <div className="agg-name">{it.vod_name}</div>
+                  <div className="agg-sub">
+                    {it.site_name}
+                    {it.vod_remarks ? ` · ${it.vod_remarks}` : ""}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {agg.items.length === 0 && <div className="empty">没有站点命中，换个关键词试试</div>}
+          {agg.failures.length > 0 && (
+            <details className="agg-fail">
+              <summary>{agg.failures.length} 个站点失败/超时</summary>
+              <ul>
+                {agg.failures.slice(0, 10).map((f) => (
+                  <li key={f.site_key}>
+                    {f.site_name}: {f.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
 
       {searchResult && (
         <div className="cat-bar">
@@ -176,7 +260,7 @@ export default function Vod({ sources }: Props) {
         </div>
       )}
 
-      {!searchResult && cats.length > 0 && (
+      {!searchResult && !agg && cats.length > 0 && (
         <div className="cat-bar">
           {cats.map((c) => (
             <button
@@ -197,7 +281,7 @@ export default function Vod({ sources }: Props) {
       {parsing && <div className="empty">正在解析播放地址…（分享页需多试几秒）</div>}
       {error && <div className="msg err">{error}</div>}
 
-      <div className="vod-grid">
+      {!agg && <div className="vod-grid">
         {shown.map((v) => (
           <div className="vod-card" key={v.vod_id} onClick={() => openDetail(v.vod_id)}>
             <div className="vod-pic">
@@ -213,8 +297,8 @@ export default function Vod({ sources }: Props) {
             </div>
           </div>
         ))}
-      </div>
-      {shown.length === 0 && !loading && !searchResult && cats.length > 0 && (
+      </div>}
+      {!agg && shown.length === 0 && !loading && !searchResult && cats.length > 0 && (
         <div className="empty">该分类暂无内容</div>
       )}
 

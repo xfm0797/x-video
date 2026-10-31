@@ -107,6 +107,30 @@ export interface PlayUrl {
   raw: string;
 }
 
+export interface AggItem {
+  source_id: string;
+  site_key: string;
+  site_name: string;
+  vod_id: string;
+  vod_name: string;
+  vod_pic?: string;
+  vod_remarks?: string;
+}
+
+export interface AggFailure {
+  site_name: string;
+  site_key: string;
+  reason: string;
+}
+
+export interface AggResult {
+  items: AggItem[];
+  failures: AggFailure[];
+  site_total: number;
+  site_skipped: number;
+  site_hit: number;
+}
+
 export const KIND_LABEL: Record<SourceKind, string> = {
   m3u: "M3U 直播",
   txt: "TXT 直播",

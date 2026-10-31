@@ -5,7 +5,7 @@ export default function Settings() {
       <div className="card">
         <h3>关于</h3>
         <p className="hint">
-          X-Video v0.2.1 · Tauri 2 + React + Rust
+          X-Video v0.3.0 · Tauri 2 + React + Rust
         </p>
         <p className="hint">
           本地服务地址：http://127.0.0.1:21600（API 与流媒体代理）
@@ -18,9 +18,10 @@ export default function Settings() {
           <li>✅ IPTV 直播播放（含 m3u8 代理重写）</li>
           <li>✅ TVBox type=1 JSON CMS 点播（分类 / 列表 / 详情 / 播放 / 搜索）</li>
           <li>✅ jx 网页解析（站点 playUrl 模板 / parses 接口 / 页面直链抽取，含相对路径与 base64）</li>
+          <li>✅ JS Spider 沙箱（Boa 引擎：req / pdfh / pdfa / base64 / md5 / local）</li>
+          <li>✅ 聚合搜索（并发多站点，结果标注来源）</li>
           <li>🚧 libmpv 播放内核（FLV/RMVB/DASH 及更多格式）</li>
-          <li>🚧 JS Spider 支持（QuickJS 沙箱）</li>
-          <li>🚧 聚合搜索、收藏与播放历史、EPG 节目单</li>
+          <li>🚧 收藏与播放历史、EPG 节目单</li>
           <li>🚧 自动更新</li>
         </ul>
       </div>
