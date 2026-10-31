@@ -4,9 +4,68 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>X-Video 播放器</title>
+    <style>
+      body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+      #boot-error {
+        display: none;
+        max-width: 640px;
+        margin: 12vh auto;
+        padding: 24px;
+        border: 1px solid #e4e6ea;
+        border-radius: 12px;
+        color: #1c2330;
+        line-height: 1.7;
+        font-size: 14px;
+      }
+      #boot-error h1 { font-size: 16px; margin: 0 0 8px; }
+      #boot-error code {
+        display: block;
+        margin-top: 10px;
+        padding: 10px;
+        background: #f4f5f7;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #6b7280;
+        word-break: break-all;
+        white-space: pre-wrap;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-error">
+      <h1>界面加载失败</h1>
+      <p>前端资源没有成功加载，或渲染脚本执行出错。请把下面的信息反馈给开发者。</p>
+      <code id="boot-detail"></code>
+    </div>
+    <script>
+      // 兜底诊断：若 6 秒后 React 仍未挂载，展示可读的错误信息而不是白屏
+      (function () {
+        window.__xvBootErrors = [];
+        window.addEventListener("error", function (e) {
+          window.__xvBootErrors.push(String(e.message || e.error || "unknown error"));
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          window.__xvBootErrors.push("promise: " + String(e.reason));
+        });
+        setTimeout(function () {
+          var root = document.getElementById("root");
+          if (root && root.childElementCount > 0) return;
+          var detail = [
+            "url: " + location.href,
+            "origin: " + location.origin + " protocol: " + location.protocol,
+            "userAgent: " + navigator.userAgent,
+            "errors: " + (window.__xvBootErrors.join(" | ") || "无 JS 错误（可能是资源请求失败）")
+          ].join("\n");
+          var box = document.getElementById("boot-error");
+          var code = document.getElementById("boot-detail");
+          if (box && code) {
+            code.textContent = detail;
+            box.style.display = "block";
+          }
+        }, 6000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

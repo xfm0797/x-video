@@ -1,5 +1,7 @@
-// API 封装：开发态走 vite 代理（同源），打包后直连本地服务
-export const API_BASE = location.protocol.startsWith("http")
+// API 封装：vite 开发态(5173)与内嵌服务(21600)同源；
+// 其余场景（如 Tauri 资源协议 tauri://）直连本地服务。
+const SAME_ORIGIN_PORTS = ["21600", "5173"];
+export const API_BASE = SAME_ORIGIN_PORTS.includes(location.port)
   ? ""
   : "http://127.0.0.1:21600";
 

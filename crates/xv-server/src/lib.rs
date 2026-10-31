@@ -21,6 +21,18 @@ struct AppState {
 
 /// 启动 HTTP 服务（API + 代理 + 静态托管），由 bin 与 Tauri 壳共用
 pub async fn serve(port: u16) -> Result<()> {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    serve_with(listener, port).await
+}
+
+/// 复用外部已绑定的 std 监听器（Tauri 壳先同步 bind，保证端口就绪后再建窗口）
+pub async fn serve_on(listener: std::net::TcpListener, port: u16) -> Result<()> {
+    listener.set_nonblocking(true)?;
+    let listener = tokio::net::TcpListener::from_std(listener)?;
+    serve_with(listener, port).await
+}
+
+pub async fn serve_with(listener: tokio::net::TcpListener, port: u16) -> Result<()> {
     let proxy_base = format!("http://127.0.0.1:{port}");
     let core = Arc::new(Core::new(proxy_base));
     let state = AppState { core };
@@ -43,9 +55,7 @@ pub async fn serve(port: u16) -> Result<()> {
         .layer(CorsLayer::very_permissive())
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{port}");
-    println!("X-Video 服务已启动: http://{addr}");
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    println!("X-Video 服务已启动: http://127.0.0.1:{port}");
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -237,7 +247,7 @@ struct ProxyReq {
     h: String,
 }
 
-async fn proxy_get(Query(q): Query<ProxyReq>) -> Response {
+async fn proxy_get(State(state): State<AppState>, Query(q): Query<ProxyReq>) -> Response {
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(15))
         .timeout(std::time::Duration::from_secs(120))
@@ -271,7 +281,8 @@ async fn proxy_get(Query(q): Query<ProxyReq>) -> Response {
         match resp.bytes().await {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes);
-                let rewritten = proxy::rewrite_m3u8(&text, &final_url, "http://127.0.0.1:21600", None);
+                let rewritten =
+                    proxy::rewrite_m3u8(&text, &final_url, &state.core.proxy_base, None);
                 return (
                     StatusCode::OK,
                     [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
