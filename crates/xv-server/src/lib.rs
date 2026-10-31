@@ -145,11 +145,12 @@ async fn play_live(State(state): State<AppState>, Query(q): Query<PlayLiveReq>) 
 // ---------- TVBox ----------
 
 async fn tvbox_sites(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    match state.core.get_tvbox(&id) {
+    match state.core.ensure_tvbox(&id).await {
         Ok(cfg) => Json(json!({
             "sites": cfg.sites,
             "lives": cfg.lives,
             "spider": cfg.spider,
+            "parse_count": cfg.parses.len(),
         }))
         .into_response(),
         Err(e) => error_response(StatusCode::BAD_REQUEST, &e.to_string()),

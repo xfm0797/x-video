@@ -231,6 +231,15 @@ impl Core {
             .ok_or_else(|| anyhow!("TVBox 配置未加载，请先刷新源"))
     }
 
+    /// 取 TVBox 配置：冷启动（进程重启后缓存为空）时自动拉取一次
+    pub async fn ensure_tvbox(&self, source_id: &str) -> Result<TvBoxConfig> {
+        if let Ok(cfg) = self.get_tvbox(source_id) {
+            return Ok(cfg);
+        }
+        self.refresh_source(source_id).await?;
+        self.get_tvbox(source_id)
+    }
+
     fn find_site(&self, source_id: &str, site_key: &str) -> Result<TvBoxSite> {
         let cfg = self.get_tvbox(source_id)?;
         cfg.sites
@@ -254,6 +263,7 @@ impl Core {
     }
 
     pub async fn cms_home(&self, source_id: &str, site_key: &str) -> Result<Vec<VodCategory>> {
+        self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
         self.cms_client(&site)?.home().await
     }
@@ -265,16 +275,19 @@ impl Core {
         tid: &str,
         pg: u32,
     ) -> Result<(Vec<VodItem>, u32, u32)> {
+        self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
         self.cms_client(&site)?.list(tid, pg).await
     }
 
     pub async fn cms_detail(&self, source_id: &str, site_key: &str, vod_id: &str) -> Result<VodDetail> {
+        self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
         self.cms_client(&site)?.detail(vod_id).await
     }
 
     pub async fn cms_search(&self, source_id: &str, site_key: &str, wd: &str) -> Result<Vec<VodItem>> {
+        self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
         self.cms_client(&site)?.search(wd).await
     }
@@ -286,6 +299,7 @@ impl Core {
         site_key: &str,
         raw_url: &str,
     ) -> Result<PlayUrl> {
+        self.ensure_tvbox(source_id).await?;
         let site = self.find_site(source_id, site_key)?;
         let headers = site.header.clone();
 
