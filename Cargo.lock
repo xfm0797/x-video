@@ -5972,7 +5972,7 @@ dependencies = [
 
 [[package]]
 name = "x-video"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -6009,7 +6009,7 @@ dependencies = [
 
 [[package]]
 name = "xv-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6027,7 +6027,7 @@ dependencies = [
 
 [[package]]
 name = "xv-mpv"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -6039,7 +6039,7 @@ dependencies = [
 
 [[package]]
 name = "xv-server"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "axum",

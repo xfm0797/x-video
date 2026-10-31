@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/xv-core", "crates/xv-server", "crates/xv-mpv", "src-tauri"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 
 [workspace.dependencies]
