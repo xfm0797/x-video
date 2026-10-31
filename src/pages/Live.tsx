@@ -15,9 +15,11 @@ export default function Live({ sources }: Props) {
   const [groups, setGroups] = useState<LiveGroup[]>([]);
   const [activeGroup, setActiveGroup] = useState<string>("");
   const [keyword, setKeyword] = useState("");
-  const [playing, setPlaying] = useState<{ url: string; name: string } | null>(
-    null
-  );
+  const [playing, setPlaying] = useState<{
+    url: string;
+    kind: string;
+    name: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +47,7 @@ export default function Live({ sources }: Props) {
       const p = await api.get<{ url: string; kind: string }>(
         `/api/play/live?u=${encodeURIComponent(url)}`
       );
-      setPlaying({ url: p.url, name });
+      setPlaying({ url: p.url, kind: p.kind, name });
     } catch (e) {
       setError((e as Error).message);
     }
@@ -145,7 +147,7 @@ export default function Live({ sources }: Props) {
       {playing && (
         <Player
           url={playing.url}
-          kind="hls"
+          kind={playing.kind}
           title={playing.name}
           onClose={() => setPlaying(null)}
         />

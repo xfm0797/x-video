@@ -28,9 +28,11 @@ export default function Vod({ sources }: Props) {
   const [pg, setPg] = useState(1);
   const [pageCount, setPageCount] = useState(1);
   const [detail, setDetail] = useState<VodDetail | null>(null);
-  const [playing, setPlaying] = useState<{ url: string; title: string } | null>(
-    null
-  );
+  const [playing, setPlaying] = useState<{
+    url: string;
+    kind: string;
+    title: string;
+  } | null>(null);
   const [keyword, setKeyword] = useState("");
   const [searchResult, setSearchResult] = useState<VodItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -116,7 +118,11 @@ export default function Vod({ sources }: Props) {
       const p = await api.get<{ url: string; kind: string }>(
         `/api/cms/${sid}/${skey}/play?url=${encodeURIComponent(rawUrl)}`
       );
-      setPlaying({ url: p.url, title: `${detail.vod_name} · ${epName}` });
+      setPlaying({
+        url: p.url,
+        kind: p.kind,
+        title: `${detail.vod_name} · ${epName}`,
+      });
     } catch (e) {
       setError(`解析失败：${(e as Error).message}`);
     } finally {
@@ -369,7 +375,7 @@ export default function Vod({ sources }: Props) {
       {playing && (
         <Player
           url={playing.url}
-          kind="hls"
+          kind={playing.kind}
           title={playing.title}
           onClose={() => setPlaying(null)}
         />
