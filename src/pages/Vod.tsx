@@ -33,6 +33,7 @@ export default function Vod({ sources }: Props) {
   const [keyword, setKeyword] = useState("");
   const [searchResult, setSearchResult] = useState<VodItem[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [parsing, setParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -102,13 +103,17 @@ export default function Vod({ sources }: Props) {
 
   const playEpisode = async (epName: string, rawUrl: string) => {
     if (!detail) return;
+    setParsing(true);
+    setError(null);
     try {
       const p = await api.get<{ url: string; kind: string }>(
         `/api/cms/${sourceId}/${siteKey}/play?url=${encodeURIComponent(rawUrl)}`
       );
       setPlaying({ url: p.url, title: `${detail.vod_name} · ${epName}` });
     } catch (e) {
-      setError((e as Error).message);
+      setError(`解析失败：${(e as Error).message}`);
+    } finally {
+      setParsing(false);
     }
   };
 
@@ -189,6 +194,7 @@ export default function Vod({ sources }: Props) {
       )}
 
       {loading && <div className="empty">加载中…</div>}
+      {parsing && <div className="empty">正在解析播放地址…（分享页需多试几秒）</div>}
       {error && <div className="msg err">{error}</div>}
 
       <div className="vod-grid">
