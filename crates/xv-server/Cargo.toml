@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 xv-core = { path = "../xv-core" }
+xv-mpv = { path = "../xv-mpv" }
 tokio.workspace = true
 axum.workspace = true
 reqwest.workspace = true

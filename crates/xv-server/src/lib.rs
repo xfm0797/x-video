@@ -13,6 +13,8 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use xv_core::{proxy, Core};
 
+mod mpv_api;
+
 #[derive(Clone)]
 struct AppState {
     core: Arc<Core>,
@@ -51,6 +53,14 @@ pub async fn serve_with(listener: tokio::net::TcpListener, port: u16) -> Result<
         .route("/api/cms/{id}/{site}/search", get(cms_search))
         .route("/api/search", get(agg_search))
         .route("/api/cms/{id}/{site}/play", get(cms_play))
+        .route("/api/mpv/status", get(mpv_api::mpv_status))
+        .route("/api/mpv/probe", post(mpv_api::mpv_probe))
+        .route("/api/mpv/install", post(mpv_api::mpv_install))
+        .route("/api/mpv/path", post(mpv_api::mpv_set_path))
+        .route("/api/mpv/open", post(mpv_api::mpv_open))
+        .route("/api/mpv/rect", post(mpv_api::mpv_rect))
+        .route("/api/mpv/cmd", post(mpv_api::mpv_cmd))
+        .route("/api/mpv/close", post(mpv_api::mpv_close))
         .route("/p", get(proxy_get))
         .fallback(get(static_files))
         .layer(CorsLayer::very_permissive())

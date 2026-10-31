@@ -1,0 +1,42 @@
+name: MPV Smoke
+
+# 手动触发的内核冒烟测试：验证「下载 → 解压 → 探测版本」这条链路。
+# 本地不便编译时，用它确认一键安装是否可用。
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "自定义 7z 下载地址（留空则取 GitHub 最新构建）"
+        required: false
+        default: ""
+
+jobs:
+  smoke:
+    name: 内核安装冒烟 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 探测已有内核
+        shell: bash
+        run: cargo run -p xv-mpv --example mpv_probe -- status
+
+      - name: Windows 一键安装
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          XVIDEO_MPV_URL: ${{ inputs.url }}
+        run: cargo run -p xv-mpv --example mpv_probe -- install
+
+      - name: 安装后复检
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cargo run -p xv-mpv --example mpv_probe -- status

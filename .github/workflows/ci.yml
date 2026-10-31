@@ -29,11 +29,11 @@ jobs:
       - name: 前端类型检查与构建
         run: npm ci && npm run build
 
-      - name: Rust 检查（核心 + 服务 + 桌面壳）
-        run: cargo check -p xv-core -p xv-server -p x-video
+      - name: Rust 检查（核心 + 服务 + 内核 + 桌面壳）
+        run: cargo check -p xv-core -p xv-server -p xv-mpv -p x-video
 
       - name: Rust 单元测试
-        run: cargo test -p xv-core
+        run: cargo test -p xv-core -p xv-mpv
 
       - name: 上传前端构建产物
         uses: actions/upload-artifact@v4

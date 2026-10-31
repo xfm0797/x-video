@@ -69,6 +69,12 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Tauri 启动失败");
+        .build(tauri::generate_context!())
+        .expect("Tauri 启动失败")
+        .run(|_app, event| {
+            // 退出前务必收掉 mpv 子进程，避免残留窗口/进程
+            if let tauri::RunEvent::Exit = event {
+                xv_mpv::engine().shutdown();
+            }
+        });
 }

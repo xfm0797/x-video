@@ -12,6 +12,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 xv-core = { path = "../crates/xv-core" }
 xv-server = { path = "../crates/xv-server" }
+xv-mpv = { path = "../crates/xv-mpv" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
