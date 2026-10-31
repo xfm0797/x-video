@@ -72,6 +72,26 @@ pub struct TvBoxSite {
     pub header: Option<serde_json::Value>,
     #[serde(default)]
     pub jar: Option<String>,
+    /// 站点级播放标识（如 "qq"、"youku"，用于指定解析器）
+    #[serde(default)]
+    pub flags: Option<serde_json::Value>,
+    /// 站点自定义解析模板，含 `{playUrl}` 占位符
+    #[serde(default, rename = "playUrl")]
+    pub play_url: Option<String>,
+}
+
+/// TVBox 配置中的网页解析接口
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TvBoxParse {
+    #[serde(default)]
+    pub name: String,
+    /// 0=直链不做解析 1=GET 拼接 2=POST JSON 3=需 WebView 4=GET 变体
+    #[serde(default, rename = "type")]
+    pub parse_type: Option<i32>,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub ext: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +112,8 @@ pub struct TvBoxConfig {
     pub sites: Vec<TvBoxSite>,
     #[serde(default)]
     pub lives: Vec<TvBoxLive>,
+    #[serde(default)]
+    pub parses: Vec<TvBoxParse>,
 }
 
 /// 点播分类

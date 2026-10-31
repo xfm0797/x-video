@@ -232,9 +232,9 @@ async fn cms_play(
     Path((id, site)): Path<(String, String)>,
     Query(q): Query<PlayReq>,
 ) -> Response {
-    match state.core.resolve_play_url(&id, &site, &q.url) {
+    match state.core.resolve_play_url(&id, &site, &q.url).await {
         Ok(play) => Json(play).into_response(),
-        Err(e) => error_response(StatusCode::BAD_REQUEST, &e.to_string()),
+        Err(e) => error_response(StatusCode::BAD_REQUEST, &format!("{e:#}")),
     }
 }
 

@@ -1,9 +1,14 @@
 use crate::model::*;
-use crate::sources::{live_parse, tvbox as tvbox_mod};
+use crate::sources::{jx, live_parse, tvbox as tvbox_mod};
 use crate::store;
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+/// jx 解析结果缓存有效期（秒）
+const JX_CACHE_TTL: u64 = 600;
+/// 单个解析接口的超时（秒）
+const JX_STEP_TIMEOUT: u64 = 15;
 
 pub struct Core {
     pub http: reqwest::Client,
@@ -13,6 +18,8 @@ pub struct Core {
     pub live_cache: Mutex<HashMap<String, Vec<LiveGroup>>>,
     /// source_id -> 已解析 TVBox 配置
     pub tvbox_cache: Mutex<HashMap<String, TvBoxConfig>>,
+    /// 原始播放页地址 -> (解析后的直链, 时间戳)
+    pub jx_cache: Mutex<HashMap<String, (String, u64)>>,
     /// 本地代理基地址，如 http://127.0.0.1:21600
     pub proxy_base: String,
 }
@@ -32,6 +39,7 @@ impl Core {
             sources: Mutex::new(sources),
             live_cache: Mutex::new(HashMap::new()),
             tvbox_cache: Mutex::new(HashMap::new()),
+            jx_cache: Mutex::new(HashMap::new()),
             proxy_base,
         }
     }
@@ -271,23 +279,178 @@ impl Core {
         self.cms_client(&site)?.search(wd).await
     }
 
-    /// 解析最终播放地址：包上本地代理，并标注格式
-    pub fn resolve_play_url(
+    /// 解析最终播放地址：必要时走 jx 网页解析，再把结果包上本地代理
+    pub async fn resolve_play_url(
         &self,
         source_id: &str,
         site_key: &str,
         raw_url: &str,
     ) -> Result<PlayUrl> {
-        let headers = self
-            .find_site(source_id, site_key)
-            .ok()
-            .and_then(|s| s.header.clone());
-        self.build_play_url(raw_url, headers.as_ref())
+        let site = self.find_site(source_id, site_key)?;
+        let headers = site.header.clone();
+
+        // 已是直链：直接代理
+        if jx::is_media_url(raw_url) {
+            return self.build_play_url(raw_url, headers.as_ref());
+        }
+
+        if let Some(cached) = self.jx_cache_get(raw_url) {
+            return self.build_play_url(&cached, headers.as_ref());
+        }
+
+        let cfg = self.get_tvbox(source_id)?;
+        let resolved = self
+            .jx_resolve(&site, &cfg, raw_url)
+            .await
+            .with_context(|| format!("解析播放页失败: {raw_url}"))?;
+        self.jx_cache_put(raw_url, &resolved);
+        self.build_play_url(&resolved, headers.as_ref())
     }
 
     /// 直播频道播放地址
     pub fn resolve_live_url(&self, raw_url: &str) -> Result<PlayUrl> {
         self.build_play_url(raw_url, None)
+    }
+
+    fn jx_cache_get(&self, raw: &str) -> Option<String> {
+        let now = now_secs();
+        let mut cache = self.jx_cache.lock().unwrap();
+        if let Some((url, ts)) = cache.get(raw) {
+            if now.saturating_sub(*ts) < JX_CACHE_TTL {
+                return Some(url.clone());
+            }
+            cache.remove(raw);
+        }
+        None
+    }
+
+    fn jx_cache_put(&self, raw: &str, resolved: &str) {
+        let mut cache = self.jx_cache.lock().unwrap();
+        if cache.len() > 512 {
+            cache.clear();
+        }
+        cache.insert(raw.to_string(), (resolved.to_string(), now_secs()));
+    }
+
+    /// jx 三级降级：站点 playUrl 模板 → 配置 parses 接口 → 页面通用抽取
+    async fn jx_resolve(
+        &self,
+        site: &TvBoxSite,
+        cfg: &TvBoxConfig,
+        raw_url: &str,
+    ) -> Result<String> {
+        let mut tried: Vec<String> = Vec::new();
+
+        // 1) 站点自定义解析模板（含 {playUrl} / {url} 占位符）
+        if let Some(tpl) = &site.play_url {
+            let target = tpl
+                .replace("{playUrl}", &urlencode(raw_url))
+                .replace("{url}", &urlencode(raw_url));
+            if target != *tpl {
+                match self.fetch_with_timeout(&target, site.header.as_ref()).await {
+                    Ok(body) => {
+                        if let Some(u) = jx::parse_jx_response(&body, &target) {
+                            return Ok(u);
+                        }
+                        tried.push("站点 playUrl 未取到直链".to_string());
+                    }
+                    Err(e) => tried.push(format!("站点 playUrl 失败: {e}")),
+                }
+            }
+        }
+
+        // 2) 配置里的解析接口，按顺序试；type=3 需 WebView 跳过
+        for p in &cfg.parses {
+            let t = p.parse_type.unwrap_or(0);
+            if p.url.is_empty() || t == 0 {
+                continue;
+            }
+            if t == 3 {
+                tried.push(format!("{}: 需 WebView，已跳过", p.name));
+                continue;
+            }
+            let result = match t {
+                2 => self.parse_api_post(&p.url, raw_url).await,
+                _ => self.parse_api_get(&p.url, raw_url).await,
+            };
+            match result {
+                Ok(body) => {
+                    if let Some(u) = jx::parse_jx_response(&body, &p.url) {
+                        return Ok(u);
+                    }
+                    tried.push(format!("{}: 无直链", p.name));
+                }
+                Err(e) => tried.push(format!("{}: {e}", p.name)),
+            }
+        }
+
+        // 3) 抓播放页自身，通用抽取
+        match self.fetch_with_timeout(raw_url, site.header.as_ref()).await {
+            Ok(body) => {
+                if let Some(u) = jx::extract_media(&body, raw_url) {
+                    return Ok(u);
+                }
+                tried.push("页面内未找到媒体地址".to_string());
+            }
+            Err(e) => tried.push(format!("页面抓取失败: {e}")),
+        }
+
+        if tried.is_empty() {
+            tried.push("配置未提供解析接口".to_string());
+        }
+        Err(anyhow!("{}", tried.join("；")))
+    }
+
+    async fn fetch_with_timeout(
+        &self,
+        url: &str,
+        headers: Option<&serde_json::Value>,
+    ) -> Result<String> {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(JX_STEP_TIMEOUT),
+            self.fetch_text(url, headers),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => Err(anyhow!("超时 {}s", JX_STEP_TIMEOUT)),
+        }
+    }
+
+    /// type=1：GET 拼接（`?url=` 前缀式或普通参数式）
+    async fn parse_api_get(&self, api: &str, raw_url: &str) -> Result<String> {
+        let sep = if api.contains("url=") {
+            ""
+        } else if api.contains('?') {
+            "&url="
+        } else {
+            "?url="
+        };
+        let target = format!("{api}{sep}{}", urlencode(raw_url));
+        self.fetch_with_timeout(&target, None).await
+    }
+
+    /// type=2：POST JSON `{"url": ...}`
+    async fn parse_api_post(&self, api: &str, raw_url: &str) -> Result<String> {
+        let body = serde_json::json!({ "url": raw_url }).to_string();
+        let fut = async {
+            let resp = self
+                .http
+                .post(api)
+                .header("Content-Type", "application/json")
+                .body(body)
+                .send()
+                .await
+                .context("请求解析接口失败")?;
+            if !resp.status().is_success() {
+                return Err(anyhow!("解析接口返回 {}", resp.status()));
+            }
+            Ok(resp.text().await?)
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(JX_STEP_TIMEOUT), fut).await {
+            Ok(r) => r,
+            Err(_) => Err(anyhow!("超时 {}s", JX_STEP_TIMEOUT)),
+        }
     }
 
     fn build_play_url(&self, raw_url: &str, headers: Option<&serde_json::Value>) -> Result<PlayUrl> {
@@ -331,4 +494,12 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn urlencode(s: &str) -> String {
+    const SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'_')
+        .remove(b'.');
+    percent_encoding::utf8_percent_encode(s, SET).to_string()
 }
