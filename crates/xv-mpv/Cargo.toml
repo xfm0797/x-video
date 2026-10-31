@@ -1,0 +1,17 @@
+[package]
+name = "xv-mpv"
+version.workspace = true
+edition.workspace = true
+description = "X-Video 的 libmpv 播放内核封装（进程 + JSON IPC + 窗口嵌入）"
+
+[dependencies]
+xv-core = { path = "../xv-core" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+reqwest.workspace = true
+sevenz-rust = "0.6"
+
+[[example]]
+name = "mpv_probe"
+path = "examples/mpv_probe.rs"

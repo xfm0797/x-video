@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/xv-core", "crates/xv-server", "src-tauri"]
+members = ["crates/xv-core", "crates/xv-server", "crates/xv-mpv", "src-tauri"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [workspace.dependencies]
