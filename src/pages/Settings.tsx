@@ -5,7 +5,7 @@ export default function Settings() {
       <div className="card">
         <h3>关于</h3>
         <p className="hint">
-          X-Video v0.2.0 · Tauri 2 + React + Rust
+          X-Video v0.2.1 · Tauri 2 + React + Rust
         </p>
         <p className="hint">
           本地服务地址：http://127.0.0.1:21600（API 与流媒体代理）

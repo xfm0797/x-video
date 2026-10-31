@@ -5038,7 +5038,7 @@ dependencies = [
 
 [[package]]
 name = "x-video"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -5074,7 +5074,7 @@ dependencies = [
 
 [[package]]
 name = "xv-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5089,7 +5089,7 @@ dependencies = [
 
 [[package]]
 name = "xv-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum",
