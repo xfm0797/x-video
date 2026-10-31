@@ -164,6 +164,11 @@ export default function Vod({ sources }: Props) {
   };
 
   const shown = searchResult ?? items;
+  // 首页首屏用当前分类的第一部做焦点横幅（搜索/聚合时不出现）
+  const hero = !agg && !searchResult && pg === 1 && items.length > 4 ? items[0] : null;
+  const gridItems = hero ? shown.filter((v) => v.vod_id !== hero.vod_id) : shown;
+  const activeCatName =
+    cats.find((c) => c.type_id === catId)?.type_name ?? "精选";
 
   return (
     <div className="page vod-page">
@@ -283,12 +288,58 @@ export default function Vod({ sources }: Props) {
         </div>
       )}
 
-      {loading && <div className="empty">加载中…</div>}
-      {parsing && <div className="empty">正在解析播放地址…（分享页需多试几秒）</div>}
+      {loading && shown.length === 0 && (
+        <div className="vod-grid">
+          {Array.from({ length: 14 }).map((_, i) => (
+            <div className="vod-card" key={`skel-${i}`}>
+              <div className="skel-pic" />
+              <div className="skel-line" />
+            </div>
+          ))}
+        </div>
+      )}
+      {!loading && parsing && (
+        <div className="empty">正在解析播放地址…（分享页需多试几秒）</div>
+      )}
       {error && <div className="msg err">{error}</div>}
 
+      {hero && (
+        <section className="hero" onClick={() => openDetail(hero.vod_id)}>
+          {hero.vod_pic && (
+            <div
+              className="hero-bg"
+              style={{ backgroundImage: `url("${hero.vod_pic}")` }}
+            />
+          )}
+          <div className="hero-grad" />
+          <div className="hero-body">
+            <span className="hero-kicker">
+              正在热映 · {activeCatName}
+            </span>
+            <h1 className="hero-title" title={hero.vod_name}>
+              {hero.vod_name}
+            </h1>
+            <p className="hero-meta">
+              {hero.vod_remarks
+                ? `${hero.vod_remarks} · 点击查看详情与选集`
+                : "点击查看详情与选集"}
+            </p>
+            <div className="hero-actions">
+              <button className="btn primary">▶ 查看并播放</button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {!agg && gridItems.length > 0 && (
+        <div className="section-head">
+          <h3>{searchResult ? `搜索「${keyword}」` : activeCatName}</h3>
+          <span>{gridItems.length} 部</span>
+        </div>
+      )}
+
       {!agg && <div className="vod-grid">
-        {shown.map((v) => (
+        {gridItems.map((v) => (
           <div className="vod-card" key={v.vod_id} onClick={() => openDetail(v.vod_id)}>
             <div className="vod-pic">
               {v.vod_pic ? (

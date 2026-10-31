@@ -57,7 +57,7 @@ export default function Settings() {
         </p>
         <div className="kv">
           <span>状态</span>
-          <b className={status?.available ? "ok" : "err"}>
+          <b className={status === null ? "" : status.available ? "ok" : "err"}>
             {status === null
               ? "检测中…"
               : status.available
@@ -158,7 +158,7 @@ export default function Settings() {
 
       <div className="card">
         <h3>关于</h3>
-        <p className="hint">X-Video v0.4.0 · Tauri 2 + React + Rust</p>
+        <p className="hint">X-Video v0.4.1 · Tauri 2 + React + Rust</p>
         <p className="hint">
           本地服务地址：http://127.0.0.1:21600（API、流媒体代理与内核控制）
         </p>
