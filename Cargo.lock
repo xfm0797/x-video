@@ -5038,7 +5038,7 @@ dependencies = [
 
 [[package]]
 name = "x-video"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -5074,12 +5074,13 @@ dependencies = [
 
 [[package]]
 name = "xv-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "encoding_rs",
  "percent-encoding",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -5088,7 +5089,7 @@ dependencies = [
 
 [[package]]
 name = "xv-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
