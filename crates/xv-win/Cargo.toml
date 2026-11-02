@@ -1,0 +1,9 @@
+[package]
+name = "xv-win"
+version.workspace = true
+edition.workspace = true
+description = "Windows 平台集成：视频子窗口、系统媒体控制"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true

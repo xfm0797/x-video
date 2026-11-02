@@ -1,0 +1,10 @@
+[package]
+name = "xv-player"
+version.workspace = true
+edition.workspace = true
+description = "libmpv 播放内核封装"
+
+[dependencies]
+libloading = "0.8"
+anyhow.workspace = true
+serde.workspace = true
