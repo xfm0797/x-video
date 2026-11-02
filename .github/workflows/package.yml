@@ -29,6 +29,8 @@ jobs:
 
       - name: 下载 libmpv 播放内核
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/fetch-libmpv.mjs
 
       - name: 构建 Tauri 应用
