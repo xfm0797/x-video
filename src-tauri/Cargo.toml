@@ -2,18 +2,16 @@
 name = "x-video"
 version.workspace = true
 edition.workspace = true
-description = "X-Video 桌面播放器"
+description = "X-Video 播放器"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
-xv-core = { path = "../crates/xv-core" }
+xv-app = { path = "../crates/xv-app" }
 xv-server = { path = "../crates/xv-server" }
-xv-mpv = { path = "../crates/xv-mpv" }
-tokio.workspace = true
+xv-win = { path = "../crates/xv-win" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros"] }
 serde.workspace = true
-serde_json.workspace = true
 anyhow.workspace = true

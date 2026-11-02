@@ -2,20 +2,20 @@
 name = "xv-server"
 version.workspace = true
 edition.workspace = true
-
-[[bin]]
-name = "xv-server"
-path = "src/main.rs"
+description = "本地 HTTP 接口与静态页面服务"
 
 [dependencies]
-xv-core = { path = "../xv-core" }
-xv-mpv = { path = "../xv-mpv" }
-tokio.workspace = true
-axum.workspace = true
-reqwest.workspace = true
+anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-anyhow.workspace = true
-base64.workspace = true
-percent-encoding.workspace = true
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs", "trace", "set-header"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "signal", "time"] }
+xv-app = { path = "../xv-app" }
+xv-library = { path = "../xv-library" }
+xv-player = { path = "../xv-player" }
+xv-win = { path = "../xv-win" }
+rusqlite = "0.32"
+
+[dev-dependencies]
+tempfile = "3"

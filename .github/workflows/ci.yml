@@ -8,7 +8,7 @@ on:
 jobs:
   verify:
     name: 编译验证与测试
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -21,19 +21,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: 安装 Linux 系统依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
-
       - name: 前端类型检查与构建
         run: npm ci && npm run build
 
-      - name: Rust 检查（核心 + 服务 + 内核 + 桌面壳）
-        run: cargo check -p xv-core -p xv-server -p xv-mpv -p x-video
+      - name: Rust 检查（全部 crate + 桌面壳）
+        run: cargo check -p xv-media -p xv-player -p xv-library -p xv-win -p xv-app -p xv-server -p x-video
 
       - name: Rust 单元测试
-        run: cargo test -p xv-core -p xv-mpv
+        run: cargo test -p xv-media
 
       - name: 上传前端构建产物
         uses: actions/upload-artifact@v4

@@ -1,80 +1,96 @@
-// 启动内嵌 API/代理服务，再打开主窗口。
-// 打包版窗口直接加载 http://127.0.0.1:21600（由内嵌服务托管前端），
-// 这样前端与 API 同源，避免 tauri:// 资源协议下接口不可用导致的白屏。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+//! 桌面壳：起本地服务 → 等端口就绪 → 建窗加载本地页面。
+//!
+//! 窗口加载的是 `http://127.0.0.1:<port>` 而不是 `tauri://localhost`，
+//! 这是历史上唯一稳定不白屏的路径；静态文件作为 bundle resource 随包分发。
+
+use std::net::TcpStream;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use tauri::{RunEvent, WebviewUrl, WebviewWindowBuilder};
+
+fn resource_dist() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for rel in ["resources/dist", "dist"] {
+                let p = dir.join(rel);
+                if p.join("index.html").is_file() {
+                    return p;
+                }
+            }
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist")
+}
+
+fn wait_port(port: u16, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(80));
+    }
+    false
+}
 
 fn main() {
     let port: u16 = std::env::var("XVIDEO_PORT")
         .ok()
-        .and_then(|p| p.parse().ok())
+        .and_then(|v| v.parse().ok())
         .unwrap_or(21600);
+    let dist = resource_dist();
+    let data_dir = xv_app::data_dir();
 
-    // 先同步绑定端口：绑定成功说明服务可用，窗口随后创建即可正常加载
-    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).ok();
-    let server_ready = listener.is_some();
+    let app_state = xv_app::App::new(data_dir.clone(), dist.clone(), port)
+        .unwrap_or_else(|e| panic!("初始化失败：{e:#}"));
+    app_state.spawn_ticker();
 
+    let server_state = Arc::clone(&app_state);
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("运行时创建失败：{e}");
+                return;
+            }
+        };
+        if let Err(e) = rt.block_on(xv_server::serve(server_state, port)) {
+            eprintln!("本地服务启动失败：{e:#}");
+        }
+    });
+
+    if !wait_port(port, Duration::from_secs(8)) {
+        eprintln!("本地服务未在预期时间内就绪，仍尝试打开窗口");
+    }
+
+    let exit_state = Arc::clone(&app_state);
     tauri::Builder::default()
         .setup(move |app| {
-            // 静态资源目录：打包后取 resources/dist，开发态回退仓库 dist
-            let mut static_dir: Option<std::path::PathBuf> = None;
-            if let Ok(dir) = app.path().resource_dir() {
-                let candidate = dir.join("dist");
-                if candidate.join("index.html").exists() {
-                    static_dir = Some(candidate);
-                }
-            }
-            if static_dir.is_none() {
-                let dev_dist = std::path::PathBuf::from("../dist");
-                if dev_dist.join("index.html").exists() {
-                    static_dir = Some(dev_dist);
-                }
-            }
-            if let Some(dir) = &static_dir {
-                std::env::set_var("XVIDEO_STATIC_DIR", dir);
-            } else {
-                eprintln!("警告：未找到前端静态资源目录，界面可能无法加载");
-            }
-
-            // 在独立线程启动服务
-            if let Some(std_listener) = listener {
-                std::thread::spawn(move || {
-                    let result: anyhow::Result<()> = (|| {
-                        let rt = tokio::runtime::Builder::new_multi_thread()
-                            .enable_all()
-                            .build()?;
-                        rt.block_on(xv_server::serve_on(std_listener, port))
-                    })();
-                    if let Err(e) = result {
-                        eprintln!("内嵌服务启动失败: {e:#}");
-                    }
-                });
-            } else {
-                eprintln!("端口 {port} 被占用，改为加载内置前端资源");
-            }
-
-            let url = if !cfg!(debug_assertions) && server_ready {
-                WebviewUrl::External(format!("http://127.0.0.1:{port}").parse()?)
-            } else {
-                WebviewUrl::App("index.html".into())
-            };
-
-            WebviewWindowBuilder::new(app, "main", url)
-                .title("X-Video 播放器")
-                .inner_size(1280.0, 800.0)
-                .min_inner_size(960.0, 640.0)
-                .center()
-                .build()?;
-
+            let url = format!("http://127.0.0.1:{port}");
+            WebviewWindowBuilder::new(
+                app,
+                "main",
+                WebviewUrl::External(url.parse().expect("本地地址应当合法")),
+            )
+            .title("X-Video")
+            .inner_size(1440.0, 920.0)
+            .min_inner_size(1024.0, 660.0)
+            .center()
+            .build()?;
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("Tauri 启动失败")
-        .run(|_app, event| {
-            // 退出前务必收掉 mpv 子进程，避免残留窗口/进程
-            if let tauri::RunEvent::Exit = event {
-                xv_mpv::engine().shutdown();
+        .run(move |_app, event| {
+            if matches!(event, RunEvent::Exit) {
+                exit_state.shutdown();
             }
         });
 }
