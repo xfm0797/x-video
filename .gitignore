@@ -19,3 +19,5 @@ xvideo-data/
 .DS_Store
 Thumbs.db
 .shots/
+.devmedia/
+.devdata/
