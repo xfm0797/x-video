@@ -1,82 +1,205 @@
-import { useEffect, useState } from "react";
-import { api, type Source } from "./lib/api";
-import Sources from "./pages/Sources";
-import Live from "./pages/Live";
-import Vod from "./pages/Vod";
-import Settings from "./pages/Settings";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type Status } from "./lib/api";
+import { Icon, type IconName } from "./components/Icon";
+import { PlayerScreen } from "./components/PlayerScreen";
+import { Movies } from "./pages/Movies";
+import { Shorts } from "./pages/Shorts";
+import { Music } from "./pages/Music";
+import { Files } from "./pages/Files";
+import { Settings } from "./pages/Settings";
+import { Detail } from "./pages/Detail";
 
-type Tab = "live" | "vod" | "sources" | "settings";
+type View = "movies" | "shorts" | "music" | "files" | "settings";
 
-const TABS: { key: Tab; label: string; icon: string; hint: string }[] = [
-  { key: "live", label: "直播", icon: "◉", hint: "IPTV 频道" },
-  { key: "vod", label: "点播", icon: "▤", hint: "影视点播" },
-  { key: "sources", label: "源管理", icon: "☰", hint: "订阅与配置" },
-  { key: "settings", label: "设置", icon: "⚙", hint: "内核与偏好" },
+const NAV: { key: View; label: string; icon: IconName }[] = [
+  { key: "movies", label: "影视", icon: "film" },
+  { key: "shorts", label: "短剧", icon: "shorts" },
+  { key: "music", label: "音乐", icon: "music" },
+  { key: "files", label: "本地文件", icon: "folder" },
+  { key: "settings", label: "设置", icon: "settings" },
 ];
 
+const TITLES: Record<View, { title: string; sub: string }> = {
+  movies: { title: "影视库", sub: "电影与剧集，续播位置自动保存" },
+  shorts: { title: "短剧", sub: "竖屏内容，播完自动接下一集" },
+  music: { title: "音乐", sub: "专辑与无损曲库" },
+  files: { title: "本地文件", sub: "管理媒体目录与扫描" },
+  settings: { title: "设置", sub: "内核与播放行为" },
+};
+
+type Playing = { id: number; title: string; kind: "video" | "audio" };
+
+function initialRoute(): { view: View; series: number | null } {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (hash.startsWith("series=")) {
+    const id = Number(hash.slice(7));
+    return { view: "movies", series: Number.isFinite(id) ? id : null };
+  }
+  const hit = NAV.find((n) => n.key === hash);
+  return { view: hit ? hit.key : "movies", series: null };
+}
+
 export default function App() {
-  // 支持通过地址 hash 直达页面（如 #vod），切换时同步 hash
-  const [tab, setTab] = useState<Tab>(() => {
-    const h = window.location.hash.replace("#", "") as Tab;
-    return TABS.some((t) => t.key === h) ? h : "live";
-  });
-  useEffect(() => {
-    if (window.location.hash !== `#${tab}`) {
-      window.history.replaceState(null, "", `#${tab}`);
-    }
-  }, [tab]);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [serverOk, setServerOk] = useState<boolean | null>(null);
+  const boot = initialRoute();
+  const [view, setView] = useState<View>(boot.view);
+  const [detailId, setDetailId] = useState<number | null>(boot.series);
+  const [playing, setPlaying] = useState<Playing | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
+  const [query, setQuery] = useState("");
+  const [toastMsg, setToastMsg] = useState("");
+  const toastTimer = useRef(0);
 
-  const loadSources = () => {
-    api
-      .get<Source[]>("/api/sources")
-      .then(setSources)
-      .catch(() => setServerOk(false));
-  };
-
-  useEffect(() => {
-    api
-      .get<{ ok: boolean }>("/api/health")
-      .then(() => setServerOk(true))
-      .catch(() => setServerOk(false));
-    loadSources();
+  const toast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToastMsg(""), 2600);
   }, []);
 
+  const loadStatus = useCallback(() => {
+    api
+      .status()
+      .then(setStatus)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadStatus();
+    const t = window.setInterval(loadStatus, 4000);
+    return () => window.clearInterval(t);
+  }, [loadStatus]);
+
+  const play = useCallback(
+    async (itemId: number, title: string, kind: "video" | "audio") => {
+      try {
+        await api.open({ item_id: itemId });
+        setPlaying({ id: itemId, title, kind });
+      } catch (e) {
+        toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [toast]
+  );
+
+  const go = (v: View) => {
+    setView(v);
+    setDetailId(null);
+  };
+
+  const meta = TITLES[view];
+  const canSearch = view === "movies" || view === "shorts" || view === "music";
+  const counts = status?.counts;
+
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="logo">
-          <span className="logo-mark">▶</span>
-          <span className="logo-text">
-            <b>X-Video</b>
-            <small>影视聚合播放器</small>
-          </span>
+    <div className="shell">
+      <aside className="side">
+        <div className="brand">
+          <div className="brand-mark">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M5 4.5v15l12-7.5z" fill="#0b0f1a" />
+            </svg>
+          </div>
+          <div className="brand-text">
+            <div className="brand-name">X-Video</div>
+            <div className="brand-sub">media player</div>
+          </div>
         </div>
-        <nav>
-          {TABS.map((t) => (
-            <div
-              key={t.key}
-              className={`nav-item${tab === t.key ? " active" : ""}`}
-              onClick={() => setTab(t.key)}
-              title={t.hint}
+
+        {NAV.map((n) => {
+          const count =
+            n.key === "movies"
+              ? (counts?.movie ?? 0) + (counts?.tv ?? 0)
+              : n.key === "shorts"
+                ? counts?.short
+                : n.key === "music"
+                  ? counts?.music
+                  : undefined;
+          return (
+            <button
+              key={n.key}
+              className={`nav-item ${view === n.key && !detailId ? "on" : ""}`}
+              onClick={() => go(n.key)}
             >
-              <span className="nav-icon">{t.icon}</span>
-              <span className="nav-label">{t.label}</span>
-            </div>
-          ))}
-        </nav>
-        <div className="sidebar-foot">
-          <span className={serverOk === false ? "dot err" : "dot ok"} />
-          <span>{serverOk === false ? "服务未连接" : "本地服务运行中"}</span>
+              <Icon name={n.icon} />
+              <span className="nav-label">{n.label}</span>
+              {count != null && count > 0 && <span className="nav-count">{count}</span>}
+            </button>
+          );
+        })}
+
+        <div className="side-foot">
+          <div className="engine-chip">
+            <i className={`dot ${status ? (status.engine.available ? "ok" : "err") : ""}`} />
+            <span>
+              {status
+                ? status.engine.available
+                  ? "内核就绪 · libmpv"
+                  : "内核不可用"
+                : "检测内核…"}
+            </span>
+          </div>
         </div>
       </aside>
-      <main className="content">
-        {tab === "live" && <Live sources={sources} />}
-        {tab === "vod" && <Vod sources={sources} />}
-        {tab === "sources" && <Sources sources={sources} onChanged={loadSources} />}
-        {tab === "settings" && <Settings />}
+
+      <main className="main">
+        <div className="topbar">
+          <div>
+            <h1>{detailId ? "剧集详情" : meta.title}</h1>
+            <div className="sub">{detailId ? "选择集数或继续上次进度" : meta.sub}</div>
+          </div>
+          {canSearch && !detailId && (
+            <div className="search">
+              <Icon name="search" size={15} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索片名、专辑"
+                spellCheck={false}
+              />
+            </div>
+          )}
+          <button className="icon-btn" onClick={loadStatus} title="刷新状态">
+            <Icon name="refresh" />
+          </button>
+          <button className="icon-btn" onClick={() => go("files")} title="添加媒体目录">
+            <Icon name="plus" />
+          </button>
+        </div>
+
+        <div className="scroll">
+          {detailId ? (
+            <Detail seriesId={detailId} onBack={() => setDetailId(null)} onPlay={play} />
+          ) : view === "movies" ? (
+            <Movies
+              status={status}
+              query={query}
+              onOpenSeries={setDetailId}
+              onPlay={(id, title) => play(id, title, "video")}
+            />
+          ) : view === "shorts" ? (
+            <Shorts query={query} onOpenSeries={setDetailId} />
+          ) : view === "music" ? (
+            <Music query={query} onOpenSeries={setDetailId} />
+          ) : view === "files" ? (
+            <Files status={status} onChanged={loadStatus} toast={toast} />
+          ) : (
+            <Settings status={status} toast={toast} />
+          )}
+        </div>
       </main>
+
+      {playing && (
+        <PlayerScreen
+          itemId={playing.id}
+          title={playing.title}
+          kind={playing.kind}
+          onClose={() => {
+            setPlaying(null);
+            loadStatus();
+          }}
+        />
+      )}
+
+      {toastMsg && <div className="toast">{toastMsg}</div>}
     </div>
   );
 }

@@ -1,183 +1,111 @@
 import { useEffect, useState } from "react";
-import { loadMode, mpv, saveMode, type MpvMode, type MpvStatus } from "../lib/mpv";
+import { api, type PlayerPrefs, type Status } from "../lib/api";
 
-export default function Settings() {
-  const [status, setStatus] = useState<MpvStatus | null>(null);
-  const [mode, setMode] = useState<MpvMode>(loadMode());
-  const [pathInput, setPathInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
-    null
-  );
+type Props = {
+  status: Status | null;
+  toast: (msg: string) => void;
+};
 
-  const refresh = async () => {
-    try {
-      setStatus(await mpv.status());
-    } catch (e) {
-      setMsg({ kind: "err", text: (e as Error).message });
-    }
-  };
+const MODES = [
+  { key: "next", label: "播完下一集" },
+  { key: "loop", label: "列表循环" },
+  { key: "single", label: "单集循环" },
+  { key: "stop", label: "播完停止" },
+];
+
+export function Settings({ status, toast }: Props) {
+  const [prefs, setPrefs] = useState<PlayerPrefs | null>(null);
 
   useEffect(() => {
-    refresh();
-    const timer = window.setInterval(() => {
-      mpv.status().then(setStatus).catch(() => {});
-    }, 1000);
-    return () => window.clearInterval(timer);
+    api
+      .settings()
+      .then((r) => setPrefs(r.player))
+      .catch(() => {});
   }, []);
 
-  const run = async (fn: () => Promise<MpvStatus | { path: string; version: string }>, ok: string) => {
-    setBusy(true);
-    setMsg(null);
+  const save = async (patch: Partial<PlayerPrefs>) => {
+    if (!prefs) return;
+    const next = { ...prefs, ...patch };
+    setPrefs(next);
     try {
-      await fn();
-      setStatus(await mpv.status());
-      setMsg({ kind: "ok", text: ok });
+      await api.saveSettings(next);
     } catch (e) {
-      setMsg({ kind: "err", text: (e as Error).message });
-    } finally {
-      setBusy(false);
+      toast(String(e));
     }
-  };
-
-  const pickMode = (m: MpvMode) => {
-    setMode(m);
-    saveMode(m);
   };
 
   return (
-    <div className="page">
-      <h2>设置</h2>
-
-      <div className="card">
+    <>
+      <div className="panel">
         <h3>播放内核</h3>
         <p className="hint">
-          浏览器内核（hls.js / video）负责 HLS、MP4；mpv 内核（libmpv）负责
-          FLV、MKV、AVI、RMVB、DASH 等容器，也是各类 fallback 的兜底。
+          内核是随包分发的 libmpv，支持 MP4 / MKV / AVI / RMVB / FLV / TS 以及
+          H.264 / HEVC / AV1 / VP9 / RMVB 等编码，硬解优先。
         </p>
         <div className="kv">
           <span>状态</span>
-          <b className={status === null ? "" : status.available ? "ok" : "err"}>
-            {status === null
-              ? "检测中…"
-              : status.available
-                ? "已就绪"
-                : "未检测到"}
+          <b className={status?.engine.available ? "ok" : "bad"}>
+            {status ? (status.engine.available ? "已就绪" : "不可用") : "检测中…"}
           </b>
         </div>
-        {status?.available && (
-          <>
-            <div className="kv">
-              <span>版本</span>
-              <b>{status.version}</b>
-            </div>
-            <div className="kv">
-              <span>路径</span>
-              <b className="mono">{status.path}</b>
-            </div>
-            <div className="kv">
-              <span>来源</span>
-              <b>{status.source}</b>
-            </div>
-          </>
-        )}
         <div className="kv">
-          <span>安装目录</span>
-          <b className="mono">{status?.install_dir || "-"}</b>
+          <span>内核路径</span>
+          <b>{status?.engine.lib || "—"}</b>
         </div>
-
-        <div className="row-actions">
-          <button className="btn ghost" onClick={refresh} disabled={busy}>
-            重新检测
-          </button>
-          {status?.can_install && (
-            <button
-              className="btn"
-              disabled={busy || status.installing}
-              onClick={() =>
-                run(() => mpv.install(), "mpv 内核安装完成，可以直接播放 FLV/RMVB 了")
-              }
-            >
-              {status.installing ? `下载中 ${status.progress}%` : "一键下载安装 mpv"}
-            </button>
-          )}
-        </div>
-        {status?.installing && (
-          <div className="mpv-progress">
-            <div className="bar" style={{ width: `${Math.max(3, status.progress)}%` }} />
+        {status?.engine.error && (
+          <div className="kv">
+            <span>错误</span>
+            <b className="bad">{status.engine.error}</b>
           </div>
         )}
+        <div className="kv">
+          <span>版本</span>
+          <b>X-Video {status?.version || "—"}</b>
+        </div>
+      </div>
 
-        <div className="mpv-setup-path">
+      <div className="panel">
+        <h3>播放行为</h3>
+        <p className="hint">决定一部剧看完一集之后的行为。</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {MODES.map((m) => (
+            <button
+              key={m.key}
+              className={`chip ${prefs?.mode === m.key ? "on" : ""}`}
+              onClick={() => save({ mode: m.key })}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ color: "var(--dim-2)", fontSize: 12.5 }}>默认音量</span>
           <input
-            placeholder="指定已有 mpv 可执行文件路径"
-            value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
+            type="range"
+            min={0}
+            max={150}
+            value={prefs?.volume ?? 100}
+            onChange={(e) => setPrefs({ ...(prefs as PlayerPrefs), volume: Number(e.target.value) })}
+            onPointerUp={() => save({ volume: prefs?.volume ?? 100 })}
+            style={{ width: 220, accentColor: "#6f8cff" }}
           />
-          <button
-            className="btn ghost"
-            disabled={busy || !pathInput.trim()}
-            onClick={() =>
-              run(() => mpv.setPath(pathInput.trim()), "已应用自定义 mpv 路径")
-            }
-          >
-            应用路径
-          </button>
-        </div>
-
-        {!status?.can_install && (
-          <p className="hint">
-            macOS 可用 <code>brew install mpv</code>，Linux 可用{" "}
-            <code>sudo apt install mpv</code>，装完点「重新检测」。
-          </p>
-        )}
-        {msg && <div className={`msg ${msg.kind}`}>{msg.text}</div>}
-      </div>
-
-      <div className="card">
-        <h3>画面承载方式</h3>
-        <p className="hint">
-          mpv 的画面由原生窗口绘制，默认嵌进应用窗口；若出现黑块、位置偏移（少数
-          WebView2 / 窗口管理器环境），可切换为浮动窗口。
-        </p>
-        <div className="row-actions">
-          <button
-            className={`btn ${mode === "embed" ? "" : "ghost"}`}
-            onClick={() => pickMode("embed")}
-          >
-            嵌入窗口
-          </button>
-          <button
-            className={`btn ${mode === "floating" ? "" : "ghost"}`}
-            onClick={() => pickMode("floating")}
-          >
-            浮动窗口
-          </button>
+          <span style={{ fontSize: 12.5, color: "var(--dim)" }}>{Math.round(prefs?.volume ?? 100)}%</span>
         </div>
       </div>
 
-      <div className="card">
-        <h3>关于</h3>
-        <p className="hint">X-Video v0.4.1 · Tauri 2 + React + Rust</p>
-        <p className="hint">
-          本地服务地址：http://127.0.0.1:21600（API、流媒体代理与内核控制）
-        </p>
+      <div className="panel">
+        <h3>数据</h3>
+        <div className="kv">
+          <span>存放位置</span>
+          <b>{status?.data_dir || "—"}</b>
+        </div>
+        <div className="kv">
+          <span>说明</span>
+          <b style={{ color: "var(--dim)" }}>
+            媒体索引 library.db、封面缓存 thumbs 都在这里，删除后不影响原始文件。
+          </b>
+        </div>
       </div>
-
-      <div className="card">
-        <h3>路线图</h3>
-        <ul className="roadmap">
-          <li>✅ 源管理（M3U / TXT / TVBox 配置）</li>
-          <li>✅ IPTV 直播播放（含 m3u8 代理重写）</li>
-          <li>✅ TVBox type=1 JSON CMS 点播（分类 / 列表 / 详情 / 播放 / 搜索）</li>
-          <li>✅ jx 网页解析（站点 playUrl 模板 / parses 接口 / 页面直链抽取）</li>
-          <li>✅ JS Spider 沙箱（Boa 引擎：req / pdfh / pdfa / base64 / md5 / local）</li>
-          <li>✅ 聚合搜索（并发多站点，结果标注来源）</li>
-          <li>✅ libmpv 播放内核（FLV / MKV / AVI / RMVB / DASH，双内核自动切换）</li>
-          <li>🚧 收藏与播放历史、EPG 节目单</li>
-          <li>🚧 自动更新</li>
-        </ul>
-      </div>
-    </div>
+    </>
   );
 }
