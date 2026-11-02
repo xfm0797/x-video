@@ -64,8 +64,14 @@ jobs:
       - name: 收集安装包
         shell: bash
         run: |
+          # Cargo workspace 的 target 在仓库根目录，安装器落在 target/release/bundle；
+          # 非 workspace 项目才会落到 src-tauri/target，两处都找一遍。
           mkdir -p bundles
-          find src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) -exec cp {} bundles/ \; || true
+          for dir in target/release/bundle src-tauri/target/release/bundle; do
+            if [ -d "$dir" ]; then
+              find "$dir" -type f \( -name "*.exe" -o -name "*.msi" \) -exec cp {} bundles/ \;
+            fi
+          done
           ls -la bundles
 
       - name: 校验安装包非空
@@ -76,7 +82,7 @@ jobs:
           echo "安装包数量：$count"
           if [ "$count" -lt 1 ]; then
             echo "没有生成 NSIS 安装包" >&2
-            ls -R src-tauri/target/release/bundle 2>/dev/null || true
+            ls -R target/release/bundle src-tauri/target/release/bundle 2>/dev/null || true
             exit 1
           fi
           size=$(stat -c %s bundles/*.exe | head -1)
