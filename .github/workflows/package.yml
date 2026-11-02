@@ -102,7 +102,7 @@ jobs:
             --title "X-Video ${GITHUB_REF_NAME#v}" \
             --draft --prerelease \
             --generate-notes || true
-          gh release upload "$GITHUB_REF_NAME" bundles/* --clobber || true
+          gh release upload "$GITHUB_REF_NAME" bundles/* --clobber
 
       - name: 上传构建产物
         if: always()
