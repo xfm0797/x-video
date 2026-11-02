@@ -11,6 +11,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      issues: write
 
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +24,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
 
       - name: 安装前端依赖
         run: npm ci
@@ -33,23 +36,55 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/fetch-libmpv.mjs
 
-      - name: 构建 Tauri 应用
-        uses: tauri-apps/tauri-action@v0
+      - name: 构建安装包（NSIS）
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tauri build --bundles nsis --verbose 2>&1 | tee tauri-build.log
+
+      # 失败时把日志发成 issue：本机网络访问不了 Actions 日志页，
+      # 但 issue 正文可以通过公开 API 匿名读取，便于排查。
+      - name: 失败时上传日志
+        if: failure()
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && 'X-Video ' || '' }}
-          releaseDraft: true
-          prerelease: true
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "运行：$RUN_URL"
+            echo '```'
+            tail -n 200 tauri-build.log 2>/dev/null || echo "(无日志文件)"
+            echo '```'
+          } > failure.log
+          gh issue create \
+            --title "build-failure ${GITHUB_RUN_ID}" \
+            --body-file failure.log || true
+
+      - name: 收集安装包
+        shell: bash
+        run: |
+          mkdir -p bundles
+          find src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) -exec cp {} bundles/ \; || true
+          ls -la bundles
+
+      - name: 创建草稿 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "X-Video ${GITHUB_REF_NAME#v}" \
+            --draft --prerelease \
+            --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" bundles/* --clobber || true
 
       - name: 上传构建产物
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: x-video-windows
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          path: bundles/*
           if-no-files-found: ignore
           retention-days: 14
