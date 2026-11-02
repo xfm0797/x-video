@@ -4507,7 +4507,7 @@ dependencies = [
 
 [[package]]
 name = "x-video"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "serde",
@@ -4542,7 +4542,7 @@ dependencies = [
 
 [[package]]
 name = "xv-app"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "serde",
@@ -4555,7 +4555,7 @@ dependencies = [
 
 [[package]]
 name = "xv-library"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -4567,7 +4567,7 @@ dependencies = [
 
 [[package]]
 name = "xv-media"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "lofty",
@@ -4577,7 +4577,7 @@ dependencies = [
 
 [[package]]
 name = "xv-player"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "libloading 0.8.9",
@@ -4586,7 +4586,7 @@ dependencies = [
 
 [[package]]
 name = "xv-server"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -4604,7 +4604,7 @@ dependencies = [
 
 [[package]]
 name = "xv-win"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "serde",
