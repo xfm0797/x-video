@@ -1,0 +1,11 @@
+[package]
+name = "xv-media"
+version.workspace = true
+edition.workspace = true
+description = "文件名解析、音频标签、媒体分类"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+lofty = "0.22"
+regex = "1"

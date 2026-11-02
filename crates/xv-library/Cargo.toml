@@ -1,0 +1,13 @@
+[package]
+name = "xv-library"
+version.workspace = true
+edition.workspace = true
+description = "媒体库：扫描、归集、索引、进度"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
+walkdir = "2"
+xv-media = { path = "../xv-media" }
+xv-player = { path = "../xv-player" }
