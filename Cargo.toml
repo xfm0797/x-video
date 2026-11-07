@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/xv-player",
+  "crates/xv-source",
   "crates/xv-media",
   "crates/xv-library",
   "crates/xv-win",
@@ -11,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 edition = "2021"
 
 [workspace.dependencies]

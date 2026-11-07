@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use xv_library::{ItemRow, Library};
 use xv_player::Player;
+use xv_source::Hub;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Rect {
@@ -58,6 +59,7 @@ pub struct App {
     pub dist: PathBuf,
     pub port: u16,
     pub library: Library,
+    pub sources: Arc<Hub>,
     pub session: Mutex<Session>,
     pub player: Mutex<Option<Arc<Player>>>,
     surface: Mutex<isize>,
@@ -97,6 +99,7 @@ fn wait_parent(timeout: Duration) -> isize {
 impl App {
     pub fn new(data_dir: PathBuf, dist: PathBuf, port: u16) -> Result<Arc<Self>> {
         let library = Library::open(&data_dir)?;
+        let sources = Arc::new(Hub::open(&data_dir.join("sources.json"))?);
         let mut prefs = PlayerPrefs::default();
         if let Ok(Some(v)) = library.get_setting("player") {
             if let Ok(p) = serde_json::from_str::<PlayerPrefs>(&v) {
@@ -108,6 +111,7 @@ impl App {
             dist,
             port,
             library,
+            sources,
             session: Mutex::new(Session::default()),
             player: Mutex::new(None),
             surface: Mutex::new(0),
@@ -257,8 +261,28 @@ impl App {
         Ok(())
     }
 
+    /// 播放一个网络地址（直播频道 / 在线影视）。不进入本地队列。
+    pub fn play_url(&self, url: &str, headers: &str) -> Result<()> {
+        {
+            let mut s = self.session.lock().unwrap_or_else(|e| e.into_inner());
+            s.item_id = None;
+            s.series_id = None;
+            s.queue.clear();
+            s.index = 0;
+            s.eof_handled = true; // 网络流不参与自动连播
+        }
+        let player = self.player();
+        if !player.available() {
+            return Err(anyhow!(player
+                .state()
+                .lib_error
+                .unwrap_or_else(|| "播放内核未就绪".to_string())));
+        }
+        player.open_with(url, 0.0, headers)
+    }
+
     pub fn next(&self, auto: bool) -> Result<()> {
-        let (next_id, mode) = {
+        let (next_id, _mode) = {
             let s = self.session.lock().unwrap();
             let mode = s.mode.clone();
             if s.queue.is_empty() {

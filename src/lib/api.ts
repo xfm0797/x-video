@@ -113,6 +113,75 @@ export type PlayerPrefs = {
   hwdec: string;
 };
 
+export type Sub = {
+  id: string;
+  name: string;
+  url: string;
+  kind: "iptv" | "tvbox" | string;
+  enabled: boolean;
+  added_at: number;
+  updated_at: number;
+  error: string | null;
+  summary: string;
+  groups: number;
+  channels: number;
+  sites: number;
+};
+
+export type LiveChannel = {
+  name: string;
+  url: string;
+  logo?: string | null;
+  tvg_id?: string | null;
+  headers?: string | null;
+};
+
+export type LiveGroup = {
+  sub_id: string;
+  sub_name: string;
+  group: string;
+  channels: LiveChannel[];
+};
+
+export type VodSite = {
+  sub_id: string;
+  sub_name: string;
+  key: string;
+  name: string;
+  kind: number;
+  supported: boolean;
+  searchable: boolean;
+  /** 需要 Java spider 内核（csp_*），跑不了 */
+  needs_java: boolean;
+};
+
+export type VodHit = {
+  site: string;
+  sub_name: string;
+  site_name: string;
+  id: string;
+  name: string;
+  pic: string | null;
+  remarks: string | null;
+  year: string | null;
+};
+
+export type VodEpisode = { name: string; url: string };
+export type VodSource = { from: string; episodes: VodEpisode[] };
+
+export type VodDetail = {
+  id: string;
+  name: string;
+  pic: string | null;
+  year: string | null;
+  area: string | null;
+  kind: string | null;
+  actor: string | null;
+  director: string | null;
+  content: string | null;
+  sources: VodSource[];
+};
+
 const BASE = "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -185,6 +254,34 @@ export const api = {
       `/api/fs/list?path=${encodeURIComponent(path)}`
     ),
   fullscreen: (on: boolean) => post<{ ok: boolean }>("/api/window/fullscreen", { on }),
+
+  // ---- 在线源 ----
+  sources: () => get<{ items: Sub[] }>("/api/sources"),
+  addSource: (body: { name?: string; url: string; kind?: string }) =>
+    post<{ sub: Sub; items: Sub[] }>("/api/sources", body),
+  removeSource: (id: string) => post<{ items: Sub[] }>("/api/sources/remove", { id }),
+  refreshSources: (id = "") => post<{ items: Sub[] }>("/api/sources/refresh", { id }),
+  toggleSource: (id: string, enabled: boolean) =>
+    post<{ items: Sub[] }>("/api/sources/toggle", { id, enabled }),
+  live: (sub?: string) =>
+    get<{ groups: LiveGroup[] }>(`/api/live${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`),
+  openLive: (body: { url: string; name: string; headers?: string }) =>
+    post<{ ok: boolean }>("/api/live/open", body),
+  vodSites: () => get<{ items: VodSite[] }>("/api/vod/sites"),
+  vodSearch: (q: string, site?: string, limit?: number) => {
+    const p = new URLSearchParams({ q });
+    if (site) p.set("site", site);
+    if (limit) p.set("limit", String(limit));
+    return get<{ hits: VodHit[]; failed: { site: string; error: string }[] }>(
+      `/api/vod/search?${p}`
+    );
+  },
+  vodDetail: (site: string, id: string) =>
+    get<{ detail: VodDetail }>(
+      `/api/vod/detail?site=${encodeURIComponent(site)}&id=${encodeURIComponent(id)}`
+    ),
+  vodOpen: (body: { site: string; url: string; flag: string }) =>
+    post<{ ok: boolean; url: string }>("/api/vod/open", body),
 };
 
 export const art = (kind: "item" | "series", id: number) => `/api/artwork/${kind}/${id}`;

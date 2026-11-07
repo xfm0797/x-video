@@ -8,26 +8,41 @@ import { Music } from "./pages/Music";
 import { Files } from "./pages/Files";
 import { Settings } from "./pages/Settings";
 import { Detail } from "./pages/Detail";
+import { Live } from "./pages/Live";
+import { Online } from "./pages/Online";
+import { Sources } from "./pages/Sources";
 
-type View = "movies" | "shorts" | "music" | "files" | "settings";
+type View = "movies" | "online" | "live" | "shorts" | "music" | "files" | "sources" | "settings";
 
 const NAV: { key: View; label: string; icon: IconName }[] = [
   { key: "movies", label: "影视", icon: "film" },
+  { key: "online", label: "在线影视", icon: "cloud" },
+  { key: "live", label: "直播", icon: "live" },
   { key: "shorts", label: "短剧", icon: "shorts" },
   { key: "music", label: "音乐", icon: "music" },
   { key: "files", label: "本地文件", icon: "folder" },
+  { key: "sources", label: "订阅源", icon: "spark" },
   { key: "settings", label: "设置", icon: "settings" },
 ];
 
 const TITLES: Record<View, { title: string; sub: string }> = {
   movies: { title: "影视库", sub: "电影与剧集，续播位置自动保存" },
+  online: { title: "在线影视", sub: "TVBox 站点跨站搜索，点开即播" },
+  live: { title: "直播", sub: "IPTV 频道，按分组浏览" },
   shorts: { title: "短剧", sub: "竖屏内容，播完自动接下一集" },
   music: { title: "音乐", sub: "专辑与无损曲库" },
   files: { title: "本地文件", sub: "管理媒体目录与扫描" },
+  sources: { title: "订阅源", sub: "IPTV 与 TVBox 订阅管理" },
   settings: { title: "设置", sub: "内核与播放行为" },
 };
 
-type Playing = { id: number; title: string; kind: "video" | "audio" };
+type Playing = {
+  kind: "video" | "audio" | "live";
+  title: string;
+  itemId?: number;
+  url?: string;
+  remote?: boolean;
+};
 
 function initialRoute(): { view: View; series: number | null } {
   const hash = window.location.hash.replace(/^#/, "");
@@ -47,12 +62,13 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [query, setQuery] = useState("");
   const [toastMsg, setToastMsg] = useState("");
+  const [sourceStamp, setSourceStamp] = useState(0);
   const toastTimer = useRef(0);
 
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastMsg(""), 2600);
+    toastTimer.current = window.setTimeout(() => setToastMsg(""), 2800);
   }, []);
 
   const loadStatus = useCallback(() => {
@@ -72,7 +88,19 @@ export default function App() {
     async (itemId: number, title: string, kind: "video" | "audio") => {
       try {
         await api.open({ item_id: itemId });
-        setPlaying({ id: itemId, title, kind });
+        setPlaying({ itemId, title, kind });
+      } catch (e) {
+        toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [toast]
+  );
+
+  const playLive = useCallback(
+    async (ch: { url: string; name: string; headers?: string }) => {
+      try {
+        await api.openLive({ url: ch.url, name: ch.name, headers: ch.headers ?? "" });
+        setPlaying({ kind: "live", title: ch.name, url: ch.url });
       } catch (e) {
         toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
       }
@@ -83,6 +111,8 @@ export default function App() {
   const go = (v: View) => {
     setView(v);
     setDetailId(null);
+    setQuery("");
+    window.location.hash = v;
   };
 
   const meta = TITLES[view];
@@ -175,12 +205,37 @@ export default function App() {
               onOpenSeries={setDetailId}
               onPlay={(id, title) => play(id, title, "video")}
             />
+          ) : view === "online" ? (
+            <Online
+              toast={toast}
+              onGoSources={() => go("sources")}
+              onPlay={(title) => setPlaying({ kind: "video", title, remote: true })}
+            />
+          ) : view === "live" ? (
+            <Live
+              key={sourceStamp}
+              toast={toast}
+              onGoSources={() => go("sources")}
+              onPlay={playLive}
+            />
           ) : view === "shorts" ? (
             <Shorts query={query} onOpenSeries={setDetailId} />
           ) : view === "music" ? (
             <Music query={query} onOpenSeries={setDetailId} />
           ) : view === "files" ? (
             <Files status={status} onChanged={loadStatus} toast={toast} />
+          ) : view === "sources" ? (
+            <Sources
+              toast={toast}
+              onGoLive={() => {
+                setSourceStamp((n) => n + 1);
+                go("live");
+              }}
+              onChanged={() => {
+                loadStatus();
+                setSourceStamp((n) => n + 1);
+              }}
+            />
           ) : (
             <Settings status={status} toast={toast} />
           )}
@@ -189,9 +244,11 @@ export default function App() {
 
       {playing && (
         <PlayerScreen
-          itemId={playing.id}
+          itemId={playing.itemId}
+          url={playing.url}
           title={playing.title}
           kind={playing.kind}
+          remote={playing.remote}
           onClose={() => {
             setPlaying(null);
             loadStatus();

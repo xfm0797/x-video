@@ -1459,3 +1459,630 @@ input {
   padding: 30px;
   line-height: 1.8;
 }
+
+/* ================= 在线源：直播 / 在线影视 / 订阅 ================= */
+
+.hint {
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.dim {
+  color: var(--dim-2);
+}
+
+.btn-primary {
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0a0d16;
+  background: linear-gradient(135deg, #8fa6ff, #6f8cff 55%, #4dd6c0);
+  transition: transform 0.16s var(--ease), filter 0.16s var(--ease);
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  transform: none;
+  cursor: not-allowed;
+}
+
+/* ---------- 空状态 ---------- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 90px 24px;
+  text-align: center;
+}
+.empty-art {
+  width: 66px;
+  height: 66px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  color: #b9c8ff;
+  background: linear-gradient(160deg, rgba(111, 140, 255, 0.24), rgba(70, 211, 189, 0.12));
+  border: 1px solid var(--line-2);
+  box-shadow: 0 18px 40px rgba(70, 100, 255, 0.18);
+}
+.empty-state h3 {
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+.empty-state p {
+  margin: 0;
+  max-width: 420px;
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.empty-state .btn-primary {
+  margin-top: 8px;
+}
+
+/* ---------- 通用面板 ---------- */
+.panel {
+  background: linear-gradient(180deg, rgba(22, 26, 35, 0.72), rgba(14, 17, 23, 0.72));
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.panel-head h2 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.panel.note {
+  background: rgba(255, 255, 255, 0.02);
+}
+.panel.note h3 {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  color: #cfd8ea;
+}
+.panel.note ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.95;
+}
+.panel.note b {
+  color: #dbe3f5;
+  font-weight: 600;
+}
+
+/* ---------- 订阅 ---------- */
+.sources {
+  padding-bottom: 30px;
+}
+.add-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.input {
+  flex: 1;
+  min-width: 260px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-2);
+  outline: none;
+  font-size: 13px;
+  transition: border-color 0.16s var(--ease), background 0.16s var(--ease);
+}
+.input.narrow {
+  flex: 0 0 190px;
+  min-width: 0;
+}
+.input:focus {
+  border-color: rgba(111, 140, 255, 0.7);
+  background: rgba(111, 140, 255, 0.06);
+}
+.select {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-2);
+  outline: none;
+  font-size: 13px;
+}
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.preset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 9px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--line-2);
+  transition: border-color 0.16s var(--ease), transform 0.16s var(--ease);
+}
+.preset:hover {
+  border-color: rgba(111, 140, 255, 0.6);
+  transform: translateY(-1px);
+}
+.preset b {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.preset i {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--dim-2);
+}
+
+.sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sub-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--line);
+  transition: border-color 0.16s var(--ease), background 0.16s var(--ease);
+}
+.sub-card:hover {
+  border-color: var(--line-2);
+  background: rgba(255, 255, 255, 0.045);
+}
+.sub-card.off {
+  opacity: 0.55;
+}
+.sub-badge {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: #b9c8ff;
+  background: rgba(111, 140, 255, 0.16);
+  border: 1px solid rgba(111, 140, 255, 0.28);
+}
+.sub-main {
+  flex: 1;
+  min-width: 0;
+}
+.sub-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.sub-title b {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.tag {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.tag.ok {
+  color: #7ce3c4;
+  background: rgba(70, 211, 189, 0.12);
+}
+.tag.err {
+  color: #ff9d9d;
+  background: rgba(255, 107, 107, 0.14);
+}
+.sub-url {
+  font-size: 11.5px;
+  color: var(--dim-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 5px;
+}
+.sub-foot {
+  display: flex;
+  gap: 14px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.sub-err {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: #ff9d9d;
+  line-height: 1.5;
+}
+.sub-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: #cfd6e4;
+  border: 1px solid var(--line);
+  transition: border-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+.mini:hover {
+  border-color: var(--line-2);
+  color: #fff;
+}
+.mini:disabled {
+  opacity: 0.5;
+}
+.mini.danger:hover {
+  color: #ff9d9d;
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+/* ---------- 直播 ---------- */
+.live {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: calc(100vh - 118px);
+}
+.live-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+}
+.seg-item {
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--dim);
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.seg-item:hover {
+  color: #dbe3f5;
+}
+.seg-item.on {
+  color: #0a0d16;
+  font-weight: 600;
+  background: linear-gradient(135deg, #a9bcff, #7f97ff);
+}
+.search.slim {
+  width: 200px;
+  height: 34px;
+}
+.live-count {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--dim-2);
+}
+.live-body {
+  display: flex;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+.live-groups {
+  flex: 0 0 186px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 4px;
+}
+.group-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--dim);
+  text-align: left;
+  transition: background 0.16s var(--ease), color 0.16s var(--ease);
+}
+.group-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e6ebf7;
+}
+.group-item.on {
+  color: #fff;
+  background: rgba(111, 140, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(111, 140, 255, 0.3);
+}
+.group-item i {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--dim-2);
+}
+.live-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  overflow: hidden;
+}
+.live-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.live-panel-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.chan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.chan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid transparent;
+  text-align: left;
+  transition: transform 0.18s var(--ease), border-color 0.18s var(--ease),
+    background 0.18s var(--ease);
+}
+.chan:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(111, 140, 255, 0.4);
+}
+.chan-logo {
+  height: 52px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: linear-gradient(150deg, #1b2130, #0f131b);
+}
+.chan-logo img {
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+.chan-logo b {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.34);
+  letter-spacing: 1px;
+}
+.chan-name {
+  font-size: 12px;
+  color: #d7deec;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 在线影视 ---------- */
+.online-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.online-bar .search {
+  flex: 1;
+  max-width: 520px;
+}
+.site-chips {
+  margin-bottom: 18px;
+}
+.chip-sub {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--dim-2);
+  margin-left: 6px;
+}
+.chip.on .chip-sub {
+  color: rgba(10, 13, 22, 0.6);
+}
+.skel {
+  background: linear-gradient(100deg, #151a24 30%, #1d2432 50%, #151a24 70%);
+  background-size: 220% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+.skel-line {
+  height: 10px;
+  margin-top: 10px;
+  border-radius: 4px;
+  background: linear-gradient(100deg, #151a24 30%, #1d2432 50%, #151a24 70%);
+  background-size: 220% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+@keyframes shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+/* 在线详情抽屉 */
+.sheet-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: rgba(3, 4, 7, 0.7);
+  backdrop-filter: blur(12px);
+  animation: fade-in 0.18s var(--ease);
+}
+.sheet {
+  position: relative;
+  width: min(880px, 100%);
+  max-height: 82vh;
+  overflow-y: auto;
+  padding: 22px 24px 26px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, rgba(24, 28, 38, 0.98), rgba(13, 16, 22, 0.99));
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow);
+  animation: pop-in 0.22s var(--ease);
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+}
+.sheet-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  background: rgba(255, 255, 255, 0.06);
+}
+.sheet-close:hover {
+  color: #fff;
+}
+.sheet-head {
+  display: flex;
+  gap: 18px;
+}
+.sheet-poster {
+  flex: 0 0 138px;
+  height: 196px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #10141c;
+  border: 1px solid var(--line);
+}
+.sheet-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.sheet-info {
+  flex: 1;
+  min-width: 0;
+}
+.sheet-info h2 {
+  margin: 2px 0 6px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.meta-line {
+  font-size: 12.5px;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+.sheet-info p {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+}
+.synopsis {
+  margin-top: 8px !important;
+  color: var(--dim) !important;
+  line-height: 1.75;
+  max-height: 84px;
+  overflow: hidden;
+}
+.source-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin: 18px 0 12px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+}
+.ep-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+.ep {
+  padding: 9px 6px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: #cfd6e4;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid transparent;
+  transition: border-color 0.16s var(--ease), color 0.16s var(--ease),
+    background 0.16s var(--ease);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep:hover {
+  color: #fff;
+  background: rgba(111, 140, 255, 0.16);
+  border-color: rgba(111, 140, 255, 0.36);
+}
+.ep:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.live-pill {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: linear-gradient(135deg, #ff6b6b, #ff9257);
+  vertical-align: middle;
+}

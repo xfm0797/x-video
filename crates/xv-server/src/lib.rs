@@ -19,10 +19,12 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use xv_app::{App, PlayerPrefs, Rect};
 
+pub mod sources_api;
+
 pub struct ApiError(String);
 
 impl ApiError {
-    fn msg(m: impl Into<String>) -> Self {
+    pub(crate) fn msg(m: impl Into<String>) -> Self {
         ApiError(m.into())
     }
 }
@@ -57,7 +59,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-type ApiResult = Result<Json<Value>, ApiError>;
+pub(crate) type ApiResult = Result<Json<Value>, ApiError>;
 
 pub fn router(app: Arc<App>) -> Router {
     let index = app.dist.join("index.html");
@@ -83,6 +85,21 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/fs/drives", get(fs_drives))
         .route("/api/fs/list", get(fs_list))
         .route("/api/window/fullscreen", post(window_fullscreen))
+        .route(
+            "/api/sources",
+            get(sources_api::subs_list).post(sources_api::add),
+        )
+        .route("/api/sources/remove", post(sources_api::remove))
+        .route("/api/sources/refresh", post(sources_api::refresh))
+        .route("/api/sources/toggle", post(sources_api::toggle))
+        .route("/api/live", get(sources_api::live))
+        .route("/api/live/open", post(sources_api::open_live))
+        .route("/api/vod/sites", get(sources_api::sites))
+        .route("/api/vod/search", get(sources_api::search))
+        .route("/api/vod/categories", get(sources_api::categories))
+        .route("/api/vod/list", get(sources_api::vod_list))
+        .route("/api/vod/detail", get(sources_api::detail))
+        .route("/api/vod/open", post(sources_api::open_vod))
         .fallback_service(spa)
         .layer(middleware::from_fn_with_state(app.clone(), origin_guard))
         .with_state(app)
@@ -513,6 +530,13 @@ async fn fs_list(Query(q): Query<FsQuery>) -> ApiResult {
 pub async fn serve(app: Arc<App>, port: u16) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!("[xv] http://127.0.0.1:{port}");
+
+    // 订阅超过 6 小时没刷新就后台更新一次，不影响首屏
+    let warm = Arc::clone(&app);
+    tokio::spawn(async move {
+        warm.sources.refresh_stale(6 * 3600).await;
+    });
+
     axum::serve(listener, router(app)).await?;
     Ok(())
 }

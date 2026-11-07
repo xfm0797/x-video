@@ -239,6 +239,14 @@ impl Player {
         Ok(())
     }
 
+    /// 打开网络地址并附带请求头（防盗链 / Referer）。`headers` 形如
+    /// `Referer: https://a/,User-Agent: xxx`，空串表示不带。
+    pub fn open_with(&self, target: &str, start: f64, headers: &str) -> Result<()> {
+        let inner = self.inner()?;
+        let _ = inner.mpv.option("http-header-fields", headers.trim());
+        self.open(target, start)
+    }
+
     /// 只补一条到播放列表尾部，用于连续播放时预取。
     pub fn append(&self, target: &str) -> Result<()> {
         let inner = self.inner()?;
@@ -408,6 +416,9 @@ fn playback_options(surface: isize) -> Vec<(&'static str, String)> {
         ("screenshot-format", "png".into()),
         ("tone-mapping", "auto".into()),
         ("ytdl", "no".into()),
+        // 网络流：默认缓存策略在直播上容易卡顿，这里显式打开并放宽超时
+        ("cache", "yes".into()),
+        ("network-timeout", "30".into()),
     ];
     if surface != 0 {
         opts.push(("wid", surface.to_string()));

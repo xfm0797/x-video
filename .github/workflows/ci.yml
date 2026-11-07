@@ -25,10 +25,10 @@ jobs:
         run: npm ci && npm run build
 
       - name: Rust 检查（全部 crate + 桌面壳）
-        run: cargo check -p xv-media -p xv-player -p xv-library -p xv-win -p xv-app -p xv-server -p x-video
+        run: cargo check -p xv-media -p xv-player -p xv-library -p xv-win -p xv-source -p xv-app -p xv-server -p x-video
 
       - name: Rust 单元测试
-        run: cargo test -p xv-media
+        run: cargo test -p xv-media -p xv-source
 
       - name: 上传前端构建产物
         uses: actions/upload-artifact@v4

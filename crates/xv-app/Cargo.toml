@@ -11,4 +11,5 @@ serde_json.workspace = true
 xv-media = { path = "../xv-media" }
 xv-library = { path = "../xv-library" }
 xv-player = { path = "../xv-player" }
+xv-source = { path = "../xv-source" }
 xv-win = { path = "../xv-win" }

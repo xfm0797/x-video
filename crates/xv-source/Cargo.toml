@@ -1,0 +1,20 @@
+[package]
+name = "xv-source"
+version.workspace = true
+edition.workspace = true
+description = "在线源：IPTV 直播订阅与 TVBox 配置解析"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { version = "0.12", features = ["json", "gzip", "blocking"] }
+encoding_rs = "0.8"
+regex = "1"
+base64 = "0.22"
+rquickjs = "0.9"
+scraper = "0.20"
+tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "rt"] }

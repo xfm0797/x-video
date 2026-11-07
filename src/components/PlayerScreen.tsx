@@ -4,15 +4,20 @@ import { epLabel, fmtTime, progressPct } from "../lib/format";
 import { Icon } from "./Icon";
 
 type Props = {
-  itemId: number;
+  itemId?: number;
+  url?: string;
   title: string;
-  kind: "video" | "audio";
+  kind: "video" | "audio" | "live";
+  /** 在线点播：不参与本地队列，也不显示选集抽屉 */
+  remote?: boolean;
   onClose: () => void;
 };
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
+export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onClose }: Props) {
+  const remote = remoteProp ?? (!!url || kind === "live");
+  const live = kind === "live";
   const [st, setSt] = useState<PlaybackState | null>(null);
   const [queue, setQueue] = useState<Item[]>([]);
   const [drag, setDrag] = useState<number | null>(null);
@@ -39,6 +44,10 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
   }, [itemId]);
 
   useEffect(() => {
+    if (!itemId) {
+      setQueue([]);
+      return;
+    }
     api
       .queue(itemId)
       .then((r) => setQueue(r.items))
@@ -118,10 +127,12 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
           togglePlay();
           break;
         case "ArrowLeft":
-          seekBy(-10);
+          if (live) handled = false;
+          else seekBy(-10);
           break;
         case "ArrowRight":
-          seekBy(10);
+          if (live) handled = false;
+          else seekBy(10);
           break;
         case "ArrowUp":
           api.cmd("volume", { value: Math.min(150, (st?.engine.volume ?? 100) + 5) });
@@ -146,7 +157,7 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, seekBy, toggleFullscreen, st?.engine.volume, st?.engine.muted, drawer, onClose]);
+  }, [togglePlay, seekBy, toggleFullscreen, st?.engine.volume, st?.engine.muted, drawer, onClose, live]);
 
   const seekTo = (clientX: number, el: HTMLElement) => {
     const r = el.getBoundingClientRect();
@@ -179,7 +190,7 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
     api.cmd("speed", { value: next });
   };
 
-  const vertical = kind === "video" && (engine?.height ?? 0) > (engine?.width ?? 0);
+  const vertical = kind !== "audio" && (engine?.height ?? 0) > (engine?.width ?? 0);
   const meta = engine
     ? [
         engine.width > 0 ? `${engine.width}×${engine.height}` : null,
@@ -203,8 +214,11 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
           <Icon name="close" />
         </button>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <h3>{engine?.title || title}</h3>
-          <div className="meta">{meta}</div>
+          <h3>
+            {live && <span className="live-pill">直播</span>}
+            {engine?.title || title}
+          </h3>
+          <div className="meta">{live ? "直播流 · 无进度" : meta}</div>
         </div>
         <div className="kbd-hint">
           <span>
@@ -224,14 +238,14 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
 
       <div className="player-body">
         <div className="player-stage" onDoubleClick={toggleFullscreen}>
-          {kind === "video" ? (
+          {kind !== "audio" ? (
             <div
               ref={surfRef}
               className={`surface ${vertical ? "vertical" : "fill"}`}
               onClick={togglePlay}
             />
           ) : (
-            <img className="music-cover" src={art("item", itemId)} alt={title} />
+            <img className="music-cover" src={itemId ? art("item", itemId) : ""} alt={title} />
           )}
           {!engine?.available && (
             <div className="player-empty">
@@ -246,7 +260,7 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
           {engine?.error && <div className="player-empty">{engine.error}</div>}
         </div>
 
-        <aside className={`eps-drawer ${drawer ? "open" : ""}`}>
+        <aside className={`eps-drawer ${drawer && !remote ? "open" : ""}`}>
           <header>
             <span>选集 · {queue.length}</span>
             <button
@@ -279,7 +293,7 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
       </div>
 
       <div className="player-bottom">
-        <div className="progress-row">
+        <div className="progress-row" style={live ? { display: "none" } : undefined}>
           <span className="time">{fmtTime(pos)}</span>
           <div
             className="track"
@@ -307,9 +321,11 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
         </div>
 
         <div className="controls">
-          <button className="cbtn" onClick={() => api.cmd("prev")} title="上一集">
-            <Icon name="prev" />
-          </button>
+          {!remote && (
+            <button className="cbtn" onClick={() => api.cmd("prev")} title="上一集">
+              <Icon name="prev" />
+            </button>
+          )}
           <button className="cbtn" onClick={() => seekBy(-10)} title="后退 10 秒">
             <Icon name="back10" />
           </button>
@@ -319,9 +335,11 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
           <button className="cbtn" onClick={() => seekBy(10)} title="前进 10 秒">
             <Icon name="fwd10" />
           </button>
-          <button className="cbtn" onClick={() => api.cmd("next")} title="下一集">
-            <Icon name="next" />
-          </button>
+          {!remote && (
+            <button className="cbtn" onClick={() => api.cmd("next")} title="下一集">
+              <Icon name="next" />
+            </button>
+          )}
 
           <div
             className="cbtn"
@@ -362,14 +380,16 @@ export function PlayerScreen({ itemId, title, kind, onClose }: Props) {
             >
               {subLabel}
             </button>
-            <button
-              className="cbtn"
-              onClick={() => setDrawer((v) => !v)}
-              title="选集"
-              style={{ color: drawer ? "#fff" : undefined }}
-            >
-              <Icon name="list" />
-            </button>
+            {!remote && (
+              <button
+                className="cbtn"
+                onClick={() => setDrawer((v) => !v)}
+                title="选集"
+                style={{ color: drawer ? "#fff" : undefined }}
+              >
+                <Icon name="list" />
+              </button>
+            )}
             <button className="cbtn" onClick={toggleFullscreen} title="全屏">
               <Icon name="fullscreen" />
             </button>
