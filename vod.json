@@ -1,0 +1,95 @@
+{
+  "name": "X-Video 自建影视源",
+  "version": "202611081335",
+  "sites": [
+    {
+      "key": "xv0_cms",
+      "name": "量子资源",
+      "type": 1,
+      "api": "https://cj.lziapi.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv1_cms",
+      "name": "金鹰资源",
+      "type": 1,
+      "api": "https://jyzyapi.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv2_cms",
+      "name": "红牛资源",
+      "type": 1,
+      "api": "https://www.hongniuzy2.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv3_cms",
+      "name": "火狐资源",
+      "type": 1,
+      "api": "https://hhzyapi.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv4_cms",
+      "name": "魔都资源",
+      "type": 1,
+      "api": "https://www.mdzyapi.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv5_cms",
+      "name": "急速资源",
+      "type": 1,
+      "api": "https://jszyapi.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv6_cms",
+      "name": "光速资源",
+      "type": 1,
+      "api": "https://api.guangsuapi.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv7_cms",
+      "name": "最大资源",
+      "type": 1,
+      "api": "https://api.zuidapi.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    },
+    {
+      "key": "xv8_cms",
+      "name": "百度云资源",
+      "type": 1,
+      "api": "https://api.apibdzy.com/api.php/provide/vod/",
+      "searchable": 1,
+      "quickSearch": 1,
+      "filter": 1
+    }
+  ],
+  "lives": [
+    {
+      "name": "自建直播",
+      "url": "https://cdn.jsdelivr.net/gh/xfm0797/x-video@sources/iptv.m3u",
+      "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+  ],
+  "parses": []
+}
