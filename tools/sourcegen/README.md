@@ -19,10 +19,14 @@
 ## 用法
 
 ```bash
-python tools/sourcegen/build.py iptv        # 只生成直播源
+python tools/sourcegen/build.py iptv        # 只生成直播源（全量实测，约 2 分钟）
+python tools/sourcegen/build.py fill        # 给线路不足的频道补线路（可重复跑）
 python tools/sourcegen/build.py vod         # 只生成影视源
 python tools/sourcegen/build.py all -p      # 两个都生成并发布到 sources 分支
 ```
+
+> `fill` 要单独起进程：一轮全量探测会跑上万次连接，把本机端口/连接池打到接近占满，
+> 同进程里接着补测只会全部超时。缺线路时多跑几次 `fill`，每轮都会捡回几条。
 
 产物写在 `tools/sourcegen/dist/`：
 `iptv.m3u`（M3U 直播清单）、`vod.json`（TVBox 格式配置，`lives` 指向自建直播源）。

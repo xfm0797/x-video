@@ -131,13 +131,52 @@ def _resolve(base: str, rel: str) -> str:
     return urllib.parse.urljoin(base, rel)
 
 
+VIDEO_STREAM_TYPES = {0x01, 0x02, 0x03, 0x10, 0x1B, 0x20, 0x24, 0x42, 0xEA}
+
+
+def ts_has_video(buf: bytes) -> bool | None:
+    """解析 TS 分片的 PMT，判断有没有视频轨。None 表示没找到 PMT（无法判断）。"""
+    types: set[int] = set()
+    i = 0
+    n = len(buf)
+    while i + 188 <= n:
+        if buf[i] != 0x47:
+            i += 1
+            continue
+        pkt = buf[i : i + 188]
+        pid = ((pkt[1] & 0x1F) << 8) | pkt[2]
+        pusi = (pkt[1] & 0x40) != 0
+        afc = (pkt[3] >> 4) & 0x3
+        off = 4
+        if afc == 3:
+            off = 5 + pkt[4]
+        if pusi and pid != 0x1FFF and off < 188:
+            payload = pkt[off:]
+            if payload[:1] == b"\x00" and len(payload) > 13:
+                p = payload[1:]
+                if p[0] == 0x02:  # PMT
+                    seclen = ((p[1] & 0x0F) << 8) | p[2]
+                    prog_info_len = ((p[10] & 0x0F) << 8) | p[11]
+                    q = 12 + prog_info_len
+                    end = min(3 + seclen - 4, len(p))
+                    while q + 5 <= end:
+                        st = p[q]
+                        eslen = ((p[q + 3] & 0x0F) << 8) | p[q + 4]
+                        types.add(st)
+                        q += 5 + eslen
+        i += 188
+    if not types:
+        return None
+    return bool(types & VIDEO_STREAM_TYPES)
+
+
 def _is_playlist(body: bytes, ctype: str) -> bool:
     head = body[:512].lstrip()
     return head.startswith(b"#EXTM3U") or "mpegurl" in ctype.lower()
 
 
-def _playlist_ok(url: str, body: bytes, depth: int = 0) -> bool:
-    """m3u8 里至少要能拿到一个分片（最多往下钻两层子清单）。"""
+def _playlist_state(url: str, body: bytes, depth: int = 0) -> str:
+    """返回 video / audio / dead —— 只认能拉到分片且带视频轨的。"""
     text = body.decode("utf-8", "replace")
     if "#EXT-X-STREAM-INF" in text or (depth == 0 and "#EXTINF" not in text):
         for line in text.splitlines():
@@ -145,14 +184,14 @@ def _playlist_ok(url: str, body: bytes, depth: int = 0) -> bool:
             if line and not line.startswith("#"):
                 sub = _resolve(url, line)
                 if depth >= 2:
-                    return True
+                    return "video"
                 try:
                     st, _, rb = fetch(sub, timeout=7, limit=65536)
                     if st == 200 and rb:
-                        return _playlist_ok(sub, rb, depth + 1)
+                        return _playlist_state(sub, rb, depth + 1)
                 except Exception:
-                    return False
-        return False
+                    return "dead"
+        return "dead"
     seg = ""
     for line in text.splitlines():
         line = line.strip()
@@ -160,15 +199,25 @@ def _playlist_ok(url: str, body: bytes, depth: int = 0) -> bool:
             seg = line
             break
     if not seg:
-        return False
+        return "dead"
     seg_url = _resolve(url, seg)
     try:
-        req = urllib.request.Request(seg_url, headers={"User-Agent": UA, "Range": "bytes=0-4095"})
-        with urllib.request.urlopen(req, timeout=7, context=CTX) as f:
-            chunk = f.read(4096)
-            return f.status in (200, 206) and len(chunk) > 0
+        req = urllib.request.Request(seg_url, headers={"User-Agent": UA, "Range": "bytes=0-262143"})
+        with urllib.request.urlopen(req, timeout=8, context=CTX) as f:
+            chunk = f.read(262144)
+            if f.status not in (200, 206) or not chunk:
+                return "dead"
     except Exception:
-        return False
+        return "dead"
+    if chunk[:1] == b"\x47":
+        has = ts_has_video(chunk)
+        if has is False:
+            return "audio"
+        return "video" if has else "video"
+    # fMP4 / 裸流：有 avc1/hvc1 就当有画面
+    if b"avc1" in chunk[:200000] or b"hvc1" in chunk[:200000] or b"ftyp" in chunk[:64]:
+        return "video"
+    return "video"
 
 
 _PCACHE_PATH = CACHE / "probe.json"
@@ -198,12 +247,15 @@ def _pcache_flush():
         _pcache_dirty = False
 
 
-def probe_cached(url: str) -> tuple[bool, str, int]:
+def probe_cached(url: str, use_cache: bool = True) -> tuple[bool, str, int]:
     global _pcache_dirty
     p = _pcache_load()
     hit = p.get(url)
-    if hit and time.time() - hit[3] < PCACHE_TTL:
-        return bool(hit[0]), hit[1], int(hit[2])
+    if use_cache and hit:
+        # 成功的结论可以久一点；失败 20 分钟后重测（直播源波动大，别把临时故障当永久）
+        ttl = PCACHE_TTL if hit[0] else 1200
+        if time.time() - hit[3] < ttl:
+            return bool(hit[0]), hit[1], int(hit[2])
     ok, info, ms = probe(url)
     with _pcache_lock:
         p[url] = [ok, info, ms, time.time()]
@@ -212,22 +264,22 @@ def probe_cached(url: str) -> tuple[bool, str, int]:
 
 
 def probe(url: str) -> tuple[bool, str, int]:
-    """返回 (可播, 说明, 耗时ms)。"""
+    """返回 (可播, 说明, 耗时ms)。纯音频流返回 False（info=audio-only）。"""
     t0 = time.time()
     try:
-        st, ctype, body = fetch(url, timeout=8, limit=131072)
+        st, ctype, body = fetch(url, timeout=8, limit=262144)
     except Exception as e:
         return False, type(e).__name__, int((time.time() - t0) * 1000)
     ms = int((time.time() - t0) * 1000)
     if st != 200:
         return False, f"HTTP {st}", ms
     if _is_playlist(body, ctype):
-        ok = _playlist_ok(url, body)
-        return ok, "hls" if ok else "hls-dead", int((time.time() - t0) * 1000)
+        state = _playlist_state(url, body)
+        return state == "video", f"hls-{state}", int((time.time() - t0) * 1000)
     if body[:3] == b"FLV":
         return True, "flv", ms
     if body[:1] == b"\x47":  # MPEG-TS sync byte
-        return True, "ts", ms
+        return ts_has_video(body) is not False, "ts", ms
     if b"ftyp" in body[:32]:
         return True, "mp4", ms
     if ctype.startswith(("video/", "audio/")) or "octet-stream" in ctype:
@@ -330,46 +382,14 @@ LIVE_LISTS = [
 
 
 def build_iptv(max_per_channel: int = 4, workers: int = 40, extra_cap: int = 240):
-    cands: list[dict] = []
-    stats = {}
-    for label, url in LIVE_LISTS:
-        try:
-            text = fetch_cached(url, timeout=25).decode("utf-8", "replace")
-            got = parse_any(text)
-        except Exception as e:
-            log(f"  {label:18s} 拉取失败 {type(e).__name__}")
-            continue
-        kept = 0
-        for c in got:
-            c["from"] = label
-            cands.append(c)
-            kept += 1
-        stats[label] = (len(got), kept)
-        log(f"  {label:18s} 候选 {len(got)}")
-
-    # 归一化 + 过滤 + 去重（同频道同地址只留一条）
-    seen: set[tuple[str, str]] = set()
-    uniq: list[dict] = []
-    extra: list[dict] = []
-    for c in cands:
-        if not url_ok(c.get("url", "")):
-            continue
-        disp, group = classify_name(c["name"])
-        if not disp:
-            continue
-        key = (disp, c["url"].strip())
-        if key in seen:
-            continue
-        seen.add(key)
-        item = dict(c, name=disp, group2=group)
-        (extra if group == "地方频道" else uniq).append(item)
+    core, local = collect_todo()
 
     # 地方台只从「小而精」的清单里取，避免上万条无效探测
-    extra = [c for c in extra if c["from"] in ("vbskycn", "fanmingming-index", "fanmingming-itv", "YueChan")]
-    extra.sort(key=lambda c: c["from"])
-    extra = extra[:extra_cap]
-    todo = uniq + extra
-    log(f"  归一化后待测 {len(todo)} 条（其中地方台 {len(extra)}），开始实测…")
+    local = [c for c in local if c["from"] in ("vbskycn", "fanmingming-index", "fanmingming-itv", "YueChan")]
+    local.sort(key=lambda c: c["from"])
+    local = local[:extra_cap]
+    todo = core + local
+    log(f"  归一化后待测 {len(todo)} 条（其中地方台 {len(local)}），开始实测…")
 
     results: list[dict] = []
     done = 0
@@ -384,6 +404,7 @@ def build_iptv(max_per_channel: int = 4, workers: int = 40, extra_cap: int = 240
                 results.append(dict(c, info=info, ms=ms))
     _pcache_flush()
     log(f"  实测完成：可播线路 {len(results)}/{len(todo)}")
+    log("  提示：整轮跑完本机连接会接近占满，缺线路的频道请另起进程跑 `build.py fill`")
 
     by_name: dict[str, list[dict]] = {}
     for r in sorted(results, key=lambda x: x["ms"]):
@@ -405,6 +426,10 @@ def build_iptv(max_per_channel: int = 4, workers: int = 40, extra_cap: int = 240
         groups["地方频道"].sort(key=lambda x: -len(x["sources"]))
         groups["地方频道"] = groups["地方频道"][:40]
 
+    return write_m3u(groups)
+
+
+def write_m3u(groups: dict[str, list[dict]]):
     lines = [
         "#EXTM3U",
         "#PLAYLIST: X-Video 自建直播源 · 全线路实测可用 · 同名频道多源自动切换",
@@ -417,6 +442,7 @@ def build_iptv(max_per_channel: int = 4, workers: int = 40, extra_cap: int = 240
         if not items:
             continue
         lines.append("")
+
         # 央视按台号排，其它按名字排
         def sort_key(x):
             m = re.match(r"CCTV-(\d+)", x["name"])
@@ -427,7 +453,7 @@ def build_iptv(max_per_channel: int = 4, workers: int = 40, extra_cap: int = 240
         for it in items:
             for idx, src in enumerate(it["sources"]):
                 attr = [f'group-title="{g}"', f'tvg-name="{it["name"]}"']
-                if it["logo"]:
+                if it.get("logo"):
                     attr.append(f'tvg-logo="{it["logo"]}"')
                 suffix = "" if idx == 0 else f" {idx + 1}"
                 lines.append(f"#EXTINF:-1 {' '.join(attr)},{it['name']}{suffix}")
@@ -442,6 +468,154 @@ def build_iptv(max_per_channel: int = 4, workers: int = 40, extra_cap: int = 240
         if summary.get(g):
             log(f"     {g:6s} {summary[g]}")
     return {"channels": sum(summary.values()), "lines": total}
+
+
+def collect_todo():
+    """收集候选：归一化频道名、过滤垃圾地址、同频道同地址去重。"""
+    cands: list[dict] = []
+    for label, url in LIVE_LISTS:
+        try:
+            text = fetch_cached(url, timeout=25).decode("utf-8", "replace")
+            got = parse_any(text)
+        except Exception as e:
+            log(f"  {label:18s} 拉取失败 {type(e).__name__}")
+            continue
+        for c in got:
+            c["from"] = label
+            cands.append(c)
+        log(f"  {label:18s} 候选 {len(got)}")
+
+    seen: set[tuple[str, str]] = set()
+    core: list[dict] = []
+    local: list[dict] = []
+    for c in cands:
+        if not url_ok(c.get("url", "")):
+            continue
+        disp, group = classify_name(c["name"])
+        if not disp:
+            continue
+        key = (disp, c["url"].strip())
+        if key in seen:
+            continue
+        seen.add(key)
+        item = dict(c, name=disp, group2=group)
+        (local if group == "地方频道" else core).append(item)
+    return core, local
+
+
+def load_existing() -> dict[str, list[dict]]:
+    """把已生成的 iptv.m3u 读回来，保留已有线路。"""
+    p = DIST / "iptv.m3u"
+    groups: dict[str, list[dict]] = {}
+    if not p.exists():
+        return groups
+    name, group, logo = "", "", ""
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("#EXTINF"):
+            m = re.search(r'group-title="([^"]*)"', line)
+            g = re.search(r'tvg-logo="([^"]*)"', line)
+            group = m.group(1) if m else "其他"
+            logo = g.group(1) if g else ""
+            name = re.sub(r"\s\d+$", "", line.rsplit(",", 1)[-1].strip())
+            groups.setdefault(group, [])
+            if not any(x["name"] == name for x in groups[group]):
+                groups[group].append({"name": name, "sources": [], "logo": logo})
+        elif line.startswith("http") and name:
+            for x in groups.get(group, []):
+                if x["name"] == name:
+                    x["sources"].append({"url": line})
+                    break
+    return groups
+
+
+def fill_missing(workers: int = 8, target: int = 3, per_channel: int = 12):
+    """给线路不足的频道补线路。刻意用独立进程 + 低并发：一次探测上万条之后
+    本机连接资源会被占满，同进程里补测只会全超时。"""
+    groups = load_existing()
+    have = {it["name"]: len(it["sources"]) for g in groups.values() for it in g}
+    core, _ = collect_todo()
+    # 只用「小而精」的清单做补测：大批量清单里多是省内组播转单播的网关，
+    # 换网络就废，补进来意义不大。
+    core = [c for c in core if c["from"] in ("vbskycn", "fanmingming-index", "fanmingming-itv", "YueChan")]
+
+    need: dict[str, list[dict]] = {}
+    for c in core:
+        name = c["name"]
+        if have.get(name, 0) >= target:
+            continue
+        exist = {s["url"] for g in groups.values() for it in g if it["name"] == name for s in it["sources"]}
+        if c["url"] in exist:
+            continue
+        need.setdefault(name, []).append(c)
+
+    if not need:
+        log("  所有频道线路都够，无需补测")
+        return {"added": 0}
+
+    log(f"  待补频道 {len(need)} 个：{'、'.join(list(need)[:12])}…")
+
+    def host_of(u: str) -> str:
+        return urllib.parse.urlparse(u).netloc.lower()
+
+    def spread(items: list[dict], limit: int) -> list[dict]:
+        bh: dict[str, list[dict]] = {}
+        for c in items:
+            bh.setdefault(host_of(c["url"]), []).append(c)
+        out: list[dict] = []
+        while len(out) < limit and any(bh.values()):
+            for h in list(bh):
+                if bh[h]:
+                    out.append(bh[h].pop(0))
+                    if len(out) >= limit:
+                        break
+        return out
+
+    plan: list[dict] = []
+    for name, items in need.items():
+        plan.extend(spread(items, per_channel))
+
+    log(f"  低并发（{workers}）补测 {len(plan)} 条…")
+    added = 0
+    flat: dict[str, dict] = {}
+    for g in groups.values():
+        for it in g:
+            flat.setdefault(it["name"], {"name": it["name"], "sources": [], "logo": it["logo"]})
+            for s in it["sources"]:
+                if all(x["url"] != s["url"] for x in flat[it["name"]]["sources"]):
+                    flat[it["name"]]["sources"].append(s)
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(probe, c["url"]) for c in plan]
+        for i, (c, fut) in enumerate(zip(plan, futs)):
+            ok, info, ms = fut.result()
+            if i < 3:
+                log(f"    [{i}] {c['name']} {info} {ms}ms {c['url'][:56]}")
+            if i % 50 == 0:
+                log(f"    {i}/{len(plan)}，已补 {added}")
+            if not ok:
+                continue
+            slot = flat.get(c["name"])
+            if slot is None:
+                flat[c["name"]] = {"name": c["name"], "sources": [{"url": c["url"]}], "logo": c.get("logo", "")}
+                added += 1
+                continue
+            if len(slot["sources"]) >= target:
+                continue
+            if all(s["url"] != c["url"] for s in slot["sources"]):
+                slot["sources"].append({"url": c["url"]})
+                added += 1
+
+    # 按频道名重新归组，避免补测后条目跨组重复
+    new_groups: dict[str, list[dict]] = {g: [] for g in GROUP_ORDER}
+    for name, it in flat.items():
+        if not it["sources"]:
+            continue
+        _, grp = classify_name(name)
+        new_groups.setdefault(grp or "其他", []).append(it)
+
+    log(f"  补测完成，新增 {added} 条线路")
+    return write_m3u(new_groups)
 
 
 # ---------------------------------------------------------------- 影视生成
@@ -703,6 +877,10 @@ def main():
     if what in ("iptv", "all"):
         log("== 生成直播源 ==")
         build_iptv(workers=workers)
+    if what == "fill":
+        log("== 补齐直播源缺失线路 ==")
+        fill_missing(workers=int(os.environ.get("XV_FILL_WORKERS", "3")))
+        return
     if what in ("vod", "all"):
         log("== 生成影视源 ==")
         build_vod()
