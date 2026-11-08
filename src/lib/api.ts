@@ -184,8 +184,23 @@ export type VodDetail = {
 
 const BASE = "";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, init);
+/** 默认超时：轮询/普通请求 15s，慢接口（搜索、订阅、解析）单独放宽。 */
+const DEFAULT_TIMEOUT = 15_000;
+
+async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = timeoutMs > 0 ? window.setTimeout(() => ctrl.abort(), timeoutMs) : 0;
+  let res: Response;
+  try {
+    res = await fetch(BASE + path, { ...init, signal: ctrl.signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("请求超时");
+    }
+    throw e;
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
   const text = await res.text();
   let data: unknown = null;
   try {
@@ -203,13 +218,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-const get = <T,>(path: string) => request<T>(path);
-const post = <T,>(path: string, body: unknown) =>
-  request<T>(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+const get = <T,>(path: string, timeoutMs?: number) => request<T>(path, undefined, timeoutMs);
+const post = <T,>(path: string, body: unknown, timeoutMs?: number) =>
+  request<T>(
+    path,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    timeoutMs
+  );
 
 export const api = {
   status: () => get<Status>("/api/status"),
@@ -258,30 +277,35 @@ export const api = {
   // ---- 在线源 ----
   sources: () => get<{ items: Sub[] }>("/api/sources"),
   addSource: (body: { name?: string; url: string; kind?: string }) =>
-    post<{ sub: Sub; items: Sub[] }>("/api/sources", body),
+    post<{ sub: Sub; items: Sub[] }>("/api/sources", body, 90_000),
   removeSource: (id: string) => post<{ items: Sub[] }>("/api/sources/remove", { id }),
-  refreshSources: (id = "") => post<{ items: Sub[] }>("/api/sources/refresh", { id }),
+  refreshSources: (id = "") => post<{ items: Sub[] }>("/api/sources/refresh", { id }, 90_000),
   toggleSource: (id: string, enabled: boolean) =>
-    post<{ items: Sub[] }>("/api/sources/toggle", { id, enabled }),
+    post<{ items: Sub[] }>("/api/sources/toggle", { id, enabled }, 30_000),
   live: (sub?: string) =>
-    get<{ groups: LiveGroup[] }>(`/api/live${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`),
+    get<{ groups: LiveGroup[] }>(
+      `/api/live${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`,
+      30_000
+    ),
   openLive: (body: { url: string; name: string; headers?: string }) =>
-    post<{ ok: boolean }>("/api/live/open", body),
+    post<{ ok: boolean }>("/api/live/open", body, 40_000),
   vodSites: () => get<{ items: VodSite[] }>("/api/vod/sites"),
   vodSearch: (q: string, site?: string, limit?: number) => {
     const p = new URLSearchParams({ q });
     if (site) p.set("site", site);
     if (limit) p.set("limit", String(limit));
     return get<{ hits: VodHit[]; failed: { site: string; error: string }[] }>(
-      `/api/vod/search?${p}`
+      `/api/vod/search?${p}`,
+      40_000
     );
   },
   vodDetail: (site: string, id: string) =>
     get<{ detail: VodDetail }>(
-      `/api/vod/detail?site=${encodeURIComponent(site)}&id=${encodeURIComponent(id)}`
+      `/api/vod/detail?site=${encodeURIComponent(site)}&id=${encodeURIComponent(id)}`,
+      40_000
     ),
   vodOpen: (body: { site: string; url: string; flag: string }) =>
-    post<{ ok: boolean; url: string }>("/api/vod/open", body),
+    post<{ ok: boolean; url: string }>("/api/vod/open", body, 40_000),
 };
 
 export const art = (kind: "item" | "series", id: number) => `/api/artwork/${kind}/${id}`;

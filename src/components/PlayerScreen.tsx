@@ -27,12 +27,18 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
 
   useEffect(() => {
     let alive = true;
+    let busy = false;
     const tick = async () => {
+      // 上一次还没回来就跳过：服务端卡顿时不堆积请求，避免占满连接池
+      if (busy) return;
+      busy = true;
       try {
         const s = await api.state();
         if (alive) setSt(s);
       } catch {
         /* 服务重启期间的瞬断忽略 */
+      } finally {
+        busy = false;
       }
     };
     tick();
@@ -58,11 +64,15 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
   useEffect(() => {
     if (kind === "audio") return;
     let alive = true;
+    let inflight = 0;
     const push = () => {
       const el = surfRef.current;
       if (!el || !alive) return;
+      // 画面区域上报只是兜底，卡顿时丢掉这一拍即可
+      if (inflight > 2) return;
       const r = el.getBoundingClientRect();
       const d = window.devicePixelRatio || 1;
+      inflight += 1;
       api
         .rect({
           x: Math.round(r.left * d),
@@ -71,7 +81,10 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
           h: Math.round(r.height * d),
           visible: true,
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          inflight -= 1;
+        });
     };
     const t0 = window.setTimeout(push, 50);
     const ro = new ResizeObserver(push);

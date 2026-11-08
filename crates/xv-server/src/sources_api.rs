@@ -173,7 +173,19 @@ pub async fn search(State(app): State<Arc<App>>, Query(q): Query<SearchQuery>) -
 
     let mut hits: Vec<Value> = Vec::new();
     let mut failed: Vec<Value> = Vec::new();
-    while let Some(joined) = set.join_next().await {
+    // 总时限：站点再多也不能让接口长时间挂着——到点收摊，把已完成的结果先回去。
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut timed_out = 0usize;
+    loop {
+        let joined = match tokio::time::timeout_at(deadline, set.join_next()).await {
+            Ok(Some(j)) => j,
+            Ok(None) => break,
+            Err(_) => {
+                timed_out = set.len();
+                set.abort_all();
+                break;
+            }
+        };
         let Ok((sub_id, sub_name, site_name, key, res)) = joined else {
             continue;
         };
@@ -194,6 +206,9 @@ pub async fn search(State(app): State<Arc<App>>, Query(q): Query<SearchQuery>) -
             }
             Err(e) => failed.push(json!({ "site": site_name, "error": e })),
         }
+    }
+    if timed_out > 0 {
+        failed.push(json!({ "site": "—", "error": format!("{timed_out} 个站点未在 30 秒内返回") }));
     }
     Ok(Json(json!({ "hits": hits, "failed": failed })))
 }

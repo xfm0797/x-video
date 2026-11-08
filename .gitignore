@@ -21,3 +21,8 @@ Thumbs.db
 .shots/
 .devmedia/
 .devdata/
+src-tauri/resources/mpv/*.7z
+src-tauri/resources/mpv/*.dll
+src-tauri/resources/mpv/7zr.exe
+.repro/
+.repro-data/

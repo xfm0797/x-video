@@ -467,9 +467,9 @@ struct FullscreenReq {
     on: bool,
 }
 
-async fn window_fullscreen(Json(req): Json<FullscreenReq>) -> ApiResult {
-    let hwnd = xv_win::main_hwnd();
-    let ok = xv_win::set_fullscreen(hwnd, req.on);
+async fn window_fullscreen(State(app): State<Arc<App>>, Json(req): Json<FullscreenReq>) -> ApiResult {
+    // 改窗口样式要在 UI 线程做，这里交给 App 调度
+    let ok = app.set_fullscreen(req.on);
     Ok(Json(json!({ "ok": ok })))
 }
 
@@ -531,9 +531,10 @@ pub async fn serve(app: Arc<App>, port: u16) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!("[xv] http://127.0.0.1:{port}");
 
-    // 订阅超过 6 小时没刷新就后台更新一次，不影响首屏
+    // 订阅超过 6 小时没刷新就后台更新一次；先让首屏和初始轮询跑完，避免抢带宽/连接。
     let warm = Arc::clone(&app);
     tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(12)).await;
         warm.sources.refresh_stale(6 * 3600).await;
     });
 

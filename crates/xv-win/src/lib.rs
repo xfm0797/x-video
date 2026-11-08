@@ -18,7 +18,6 @@ mod win {
     type LPARAM = isize;
 
     const WS_CHILD: DWORD = 0x4000_0000;
-    const WS_VISIBLE: DWORD = 0x1000_0000;
     const WS_CLIPCHILDREN: DWORD = 0x0200_0000;
     const WS_CLIPSIBLINGS: DWORD = 0x0400_0000;
     const WS_EX_NOACTIVATE: DWORD = 0x0800_0000;
@@ -164,7 +163,7 @@ mod win {
                 WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
                 class.as_ptr(),
                 title.as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | SS_BLACKRECT,
+                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | SS_BLACKRECT,
                 x,
                 y,
                 w.max(1),

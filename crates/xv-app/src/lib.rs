@@ -54,6 +54,9 @@ impl Default for Session {
     }
 }
 
+/// 把闭包送回 UI 线程执行的调度器（壳层用 `run_on_main_thread` 实现）。
+pub type UiDispatch = Arc<dyn Fn(Box<dyn FnOnce() + Send>) + Send + Sync>;
+
 pub struct App {
     pub data_dir: PathBuf,
     pub dist: PathBuf,
@@ -62,7 +65,9 @@ pub struct App {
     pub sources: Arc<Hub>,
     pub session: Mutex<Session>,
     pub player: Mutex<Option<Arc<Player>>>,
-    surface: Mutex<isize>,
+    surface: Arc<Mutex<isize>>,
+    /// 由 Tauri 壳注入：把闭包送回 UI 线程执行
+    ui: Mutex<Option<UiDispatch>>,
     prefs: Mutex<PlayerPrefs>,
     pub started: Instant,
     pub scanning: AtomicBool,
@@ -80,20 +85,6 @@ pub fn data_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
     base.join("XVideo2")
-}
-
-fn wait_parent(timeout: Duration) -> isize {
-    let deadline = Instant::now() + timeout;
-    loop {
-        let h = xv_win::main_hwnd();
-        if h != 0 {
-            return h;
-        }
-        if Instant::now() > deadline {
-            return 0;
-        }
-        std::thread::sleep(Duration::from_millis(80));
-    }
 }
 
 impl App {
@@ -114,7 +105,8 @@ impl App {
             sources,
             session: Mutex::new(Session::default()),
             player: Mutex::new(None),
-            surface: Mutex::new(0),
+            surface: Arc::new(Mutex::new(0)),
+            ui: Mutex::new(None),
             prefs: Mutex::new(prefs),
             started: Instant::now(),
             scanning: AtomicBool::new(false),
@@ -125,21 +117,85 @@ impl App {
         Ok(app)
     }
 
+    /// 注入 UI 线程调度能力（壳层在 setup 里调用）。
+    pub fn set_ui_dispatch(&self, f: UiDispatch) {
+        if let Ok(mut slot) = self.ui.lock() {
+            *slot = Some(f);
+        }
+    }
+
+    /// 在 UI 线程执行并等待完成。没有调度器（如脱离壳跑服务）时返回 false。
+    pub fn ui_call<F: FnOnce() + Send + 'static>(&self, f: F) -> bool {
+        let dispatch = self.ui.lock().ok().and_then(|g| g.clone());
+        let Some(dispatch) = dispatch else {
+            return false;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        dispatch(Box::new(move || {
+            f();
+            let _ = tx.send(());
+        }));
+        rx.recv_timeout(Duration::from_secs(5)).is_ok()
+    }
+
+    /// 全屏切换：改窗口样式必须回 UI 线程做。
+    pub fn set_fullscreen(&self, on: bool) -> bool {
+        let hwnd = xv_win::main_hwnd();
+        if hwnd == 0 {
+            return false;
+        }
+        if self.ui.lock().map(|g| g.is_some()).unwrap_or(false) {
+            let done = std::sync::Arc::new(AtomicBool::new(false));
+            let flag = std::sync::Arc::clone(&done);
+            let ok = self.ui_call(move || {
+                let r = xv_win::set_fullscreen(hwnd, on);
+                flag.store(r, Ordering::Relaxed);
+            });
+            return ok && done.load(Ordering::Relaxed);
+        }
+        xv_win::set_fullscreen(hwnd, on)
+    }
+
+    /// 由 UI 线程调用：把原生承载面挂到主窗口上，返回承载面句柄（0 表示没有）。
+    pub fn set_surface(&self, parent: isize) -> isize {
+        let mut surface = self.surface.lock().unwrap_or_else(|e| e.into_inner());
+        if *surface == 0 && parent != 0 {
+            let rect = self.session.lock().map(|s| s.rect).unwrap_or_default();
+            *surface = xv_win::create_surface(parent, rect.x, rect.y, rect.w, rect.h);
+        }
+        *surface
+    }
+
     /// 播放内核（首次调用时创建原生承载面）。
+    ///
+    /// 承载面必须由 **UI 线程** 创建（见 `set_surface`）：Windows 上父窗口
+    /// 与子窗口归属不同线程时，`WM_PARENTNOTIFY`、焦点、绘制这些消息会退化成
+    /// 跨线程同步调用，父窗口忙一点就互等，表现出来就是「点一下程序未响应」。
+    /// 所以这里只读取已经建好的句柄，绝不在请求线程里建窗。
     pub fn player(&self) -> Arc<Player> {
         let mut guard = self.player.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(p) = guard.as_ref() {
             return Arc::clone(p);
         }
-        let mut surface = self.surface.lock().unwrap_or_else(|e| e.into_inner());
-        if *surface == 0 {
-            let parent = wait_parent(Duration::from_millis(2500));
-            if parent != 0 {
-                let rect = self.session.lock().map(|s| s.rect).unwrap_or_default();
-                *surface = xv_win::create_surface(parent, rect.x, rect.y, rect.w, rect.h);
+        // 承载面还没建就请 UI 线程来建：跨线程建子窗口会让父子消息跨线程同步。
+        if *self.surface.lock().unwrap_or_else(|e| e.into_inner()) == 0 {
+            let slot = Arc::clone(&self.surface);
+            let created = self.ui_call(move || {
+                let mut s = slot.lock().unwrap_or_else(|e| e.into_inner());
+                if *s == 0 {
+                    let parent = xv_win::main_hwnd();
+                    if parent != 0 {
+                        *s = xv_win::create_surface(parent, 0, 0, 0, 0);
+                    }
+                }
+            });
+            if !created {
+                // 没有壳（单跑服务）时保持 0，播放器退化为无画面
+                eprintln!("[player] 没有 UI 线程调度器，跳过承载面创建");
             }
         }
-        let player = Arc::new(Player::new(*surface));
+        let surface = *self.surface.lock().unwrap_or_else(|e| e.into_inner());
+        let player = Arc::new(Player::new(surface));
         if let Ok(prefs) = self.prefs.lock() {
             let _ = player.set_volume(prefs.volume);
             let _ = player.set_speed(prefs.speed);
@@ -201,7 +257,13 @@ impl App {
             s.rect = rect;
         }
         let surface = *self.surface.lock().unwrap_or_else(|e| e.into_inner());
-        if surface != 0 {
+        if surface == 0 {
+            return;
+        }
+        let moved = self.ui_call(move || {
+            xv_win::set_surface(surface, rect.x, rect.y, rect.w, rect.h, visible);
+        });
+        if !moved {
             xv_win::set_surface(surface, rect.x, rect.y, rect.w, rect.h, visible);
         }
     }
@@ -404,7 +466,9 @@ impl App {
         }
         let surface = *self.surface.lock().unwrap_or_else(|e| e.into_inner());
         if surface != 0 {
-            xv_win::destroy_surface(surface);
+            if !self.ui_call(move || xv_win::destroy_surface(surface)) {
+                xv_win::destroy_surface(surface);
+            }
         }
     }
 

@@ -64,6 +64,7 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState("");
   const [sourceStamp, setSourceStamp] = useState(0);
   const toastTimer = useRef(0);
+  const statusBusy = useRef(false);
 
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -72,10 +73,15 @@ export default function App() {
   }, []);
 
   const loadStatus = useCallback(() => {
+    if (statusBusy.current) return;
+    statusBusy.current = true;
     api
       .status()
       .then(setStatus)
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        statusBusy.current = false;
+      });
   }, []);
 
   useEffect(() => {
