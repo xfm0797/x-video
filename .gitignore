@@ -26,3 +26,9 @@ src-tauri/resources/mpv/*.dll
 src-tauri/resources/mpv/7zr.exe
 .repro/
 .repro-data/
+
+# 源生成产物（发布在 sources 分支，不进 main）
+tools/sourcegen/dist/
+tools/sourcegen/.cache/
+.sources-work/
+.repro-data*/
