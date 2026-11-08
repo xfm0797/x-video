@@ -325,6 +325,27 @@ impl App {
 
     /// 播放一个网络地址（直播频道 / 在线影视）。不进入本地队列。
     pub fn play_url(&self, url: &str, headers: &str) -> Result<()> {
+        self.play_candidates(&[url.to_string()], headers)
+            .map(|_| ())
+    }
+
+    /// 按顺序尝试多个直播地址：每个地址等它真正出画面（FILE_LOADED）或报错，
+    /// 失败自动切下一个。IPTV 的「频道名,url1#url2#url3」多源就是为这个准备的。
+    /// 返回成功命中的候选下标。
+    pub fn play_candidates(&self, urls: &[String], headers: &str) -> Result<usize> {
+        // 去重、去空，最多 4 个，别让一次点击卡太久
+        let mut cands: Vec<String> = Vec::new();
+        for u in urls {
+            let u = u.trim();
+            if !u.is_empty() && !cands.iter().any(|c| c == u) {
+                cands.push(u.to_string());
+            }
+            if cands.len() >= 4 {
+                break;
+            }
+        }
+        anyhow::ensure!(!cands.is_empty(), "没有可播放的地址");
+
         {
             let mut s = self.session.lock().unwrap_or_else(|e| e.into_inner());
             s.item_id = None;
@@ -340,7 +361,35 @@ impl App {
                 .lib_error
                 .unwrap_or_else(|| "播放内核未就绪".to_string())));
         }
-        player.open_with(url, 0.0, headers)
+
+        let mut fails: Vec<String> = Vec::new();
+        let mut raws: Vec<String> = Vec::new();
+        for (i, url) in cands.iter().enumerate() {
+            player.open_with(url, 0.0, headers)?;
+            if player.wait_ready(10.0) {
+                return Ok(i);
+            }
+            let st = player.state();
+            fails.push(st.error.unwrap_or_else(|| "连接超时".to_string()));
+            if let Some(d) = st.error_detail {
+                if !d.is_empty() {
+                    raws.push(format!(">> {url}\n{d}"));
+                }
+            }
+        }
+
+        let detail = if raws.is_empty() {
+            None
+        } else {
+            Some(raws.join("\n\n"))
+        };
+        let summary = format!(
+            "试了 {} 个直播地址都无法播放。最后失败原因：{}",
+            cands.len(),
+            fails.last().cloned().unwrap_or_default()
+        );
+        player.set_play_error(summary.clone(), detail);
+        Err(anyhow!(summary))
     }
 
     pub fn next(&self, auto: bool) -> Result<()> {

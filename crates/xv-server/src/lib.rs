@@ -319,6 +319,7 @@ async fn player_state(State(app): State<Arc<App>>) -> ApiResult {
         "engine": {
             "available": st.available,
             "loaded": st.loaded,
+            "ready": st.ready,
             "playing": st.playing,
             "position": st.position,
             "duration": st.duration,
@@ -339,6 +340,7 @@ async fn player_state(State(app): State<Arc<App>>) -> ApiResult {
             "sub_id": st.sub_id,
             "eof": st.eof,
             "error": st.error,
+            "error_detail": st.error_detail,
         },
         "session": session,
     })))

@@ -93,7 +93,11 @@ pub async fn live(State(app): State<Arc<App>>, Query(q): Query<LiveQuery>) -> Ap
 
 #[derive(Deserialize)]
 pub struct OpenLiveReq {
+    #[serde(default)]
     url: String,
+    /// 同名频道的候选地址（IPTV 多源），按顺序尝试。
+    #[serde(default)]
+    urls: Vec<String>,
     #[serde(default)]
     name: String,
     #[serde(default)]
@@ -101,13 +105,16 @@ pub struct OpenLiveReq {
 }
 
 pub async fn open_live(State(app): State<Arc<App>>, Json(req): Json<OpenLiveReq>) -> ApiResult {
-    let url = req.url.clone();
+    let mut urls = req.urls.clone();
+    if !req.url.is_empty() {
+        urls.insert(0, req.url.clone());
+    }
     let headers = req.headers.clone();
     let name = req.name.clone();
-    tokio::task::spawn_blocking(move || app.play_url(&url, &headers))
+    let ok = tokio::task::spawn_blocking(move || app.play_candidates(&urls, &headers))
         .await
         .map_err(|e| ApiError::msg(e.to_string()))??;
-    Ok(Json(json!({ "ok": true, "name": name })))
+    Ok(Json(json!({ "ok": true, "name": name, "source_index": ok })))
 }
 
 // ---------- 点播 ----------

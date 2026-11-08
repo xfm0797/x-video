@@ -267,10 +267,30 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
               {engine?.error || "请确认安装目录下的 libmpv-2.dll 存在。"}
             </div>
           )}
-          {engine?.available && !engine.loaded && !engine.error && (
-            <div className="player-loading">正在打开…</div>
+          {engine?.available && !engine.ready && !engine.error && (
+            <div className="player-loading">
+              {live ? "正在连接频道…" : "正在打开…"}
+            </div>
           )}
-          {engine?.error && <div className="player-empty">{engine.error}</div>}
+          {engine?.error && (
+            <div className="player-empty">
+              {engine.error}
+              {engine.error_detail && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    opacity: 0.55,
+                    maxWidth: 560,
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {engine.error_detail}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <aside className={`eps-drawer ${drawer && !remote ? "open" : ""}`}>

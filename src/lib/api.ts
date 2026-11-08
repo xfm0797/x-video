@@ -54,6 +54,8 @@ export type Track = {
 export type EngineState = {
   available: boolean;
   loaded: boolean;
+  /** mpv 真正完成加载（FILE_LOADED）后才为 true */
+  ready: boolean;
   playing: boolean;
   position: number;
   duration: number;
@@ -74,6 +76,8 @@ export type EngineState = {
   sub_id: number | null;
   eof: boolean;
   error: string | null;
+  /** mpv 日志里的原始失败信息 */
+  error_detail: string | null;
 };
 
 export type Session = {
@@ -287,8 +291,8 @@ export const api = {
       `/api/live${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`,
       30_000
     ),
-  openLive: (body: { url: string; name: string; headers?: string }) =>
-    post<{ ok: boolean }>("/api/live/open", body, 40_000),
+  openLive: (body: { url?: string; urls?: string[]; name: string; headers?: string }) =>
+    post<{ ok: boolean; source_index?: number }>("/api/live/open", body, 60_000),
   vodSites: () => get<{ items: VodSite[] }>("/api/vod/sites"),
   vodSearch: (q: string, site?: string, limit?: number) => {
     const p = new URLSearchParams({ q });

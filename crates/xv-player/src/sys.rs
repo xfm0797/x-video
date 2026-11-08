@@ -21,6 +21,8 @@ pub const FORMAT_DOUBLE: c_int = 5;
 
 pub const EVENT_NONE: c_int = 0;
 pub const EVENT_SHUTDOWN: c_int = 1;
+pub const EVENT_LOG_MESSAGE: c_int = 2;
+pub const EVENT_START_FILE: c_int = 6;
 pub const EVENT_END_FILE: c_int = 7;
 pub const EVENT_FILE_LOADED: c_int = 8;
 pub const EVENT_PROPERTY_CHANGE: c_int = 22;
@@ -49,6 +51,15 @@ pub struct MpvEventEndFile {
     pub playlist_insert_num_entries: c_int,
 }
 
+/// `MPV_EVENT_LOG_MESSAGE` 的事件体。
+#[repr(C)]
+pub struct MpvEventLogMessage {
+    pub prefix: *const c_char,
+    pub level: *const c_char,
+    pub text: *const c_char,
+    pub log_level: c_int,
+}
+
 type FnCreate = unsafe extern "C" fn() -> *mut Handle;
 type FnInitialize = unsafe extern "C" fn(*mut Handle) -> c_int;
 type FnDestroy = unsafe extern "C" fn(*mut Handle);
@@ -62,6 +73,7 @@ type FnObserveProperty =
     unsafe extern "C" fn(*mut Handle, u64, *const c_char, c_int) -> c_int;
 type FnWaitEvent = unsafe extern "C" fn(*mut Handle, f64) -> *mut MpvEvent;
 type FnErrorString = unsafe extern "C" fn(c_int) -> *const c_char;
+type FnRequestLogMessages = unsafe extern "C" fn(*mut Handle, *const c_char) -> c_int;
 type FnFree = unsafe extern "C" fn(*mut c_void);
 
 pub struct Api {
@@ -79,6 +91,7 @@ pub struct Api {
     pub observe_property: FnObserveProperty,
     pub wait_event: FnWaitEvent,
     pub error_string: FnErrorString,
+    pub request_log_messages: FnRequestLogMessages,
     pub free: FnFree,
 }
 
@@ -153,6 +166,7 @@ impl Api {
                 observe_property: sym!("mpv_observe_property\0", FnObserveProperty),
                 wait_event: sym!("mpv_wait_event\0", FnWaitEvent),
                 error_string: sym!("mpv_error_string\0", FnErrorString),
+                request_log_messages: sym!("mpv_request_log_messages\0", FnRequestLogMessages),
                 free: sym!("mpv_free\0", FnFree),
                 _lib: lib,
             })
@@ -339,6 +353,19 @@ impl Mpv {
         if rc < 0 {
             return Err(anyhow!(
                 "订阅 {name} 失败：{}",
+                self.api.error_text(rc)
+            ));
+        }
+        Ok(())
+    }
+
+    /// 打开日志事件（warn 及以上），用于把 mpv 的失败原因带回给界面。
+    pub fn request_log_messages(&self, level: &str) -> Result<()> {
+        let l = CString::new(level)?;
+        let rc = unsafe { (self.api.request_log_messages)(self.ctx, l.as_ptr()) };
+        if rc < 0 {
+            return Err(anyhow!(
+                "开启日志级别 {level} 失败：{}",
                 self.api.error_text(rc)
             ));
         }

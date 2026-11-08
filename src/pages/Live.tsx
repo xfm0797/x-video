@@ -3,7 +3,7 @@ import { api, type LiveChannel, type LiveGroup, type Sub } from "../lib/api";
 import { Icon } from "../components/Icon";
 
 type Props = {
-  onPlay: (ch: { url: string; name: string; headers?: string }) => void;
+  onPlay: (ch: { url: string; name: string; urls?: string[]; headers?: string }) => void;
   onGoSources: () => void;
   toast: (msg: string) => void;
 };
@@ -141,30 +141,39 @@ export function Live({ onPlay, onGoSources, toast }: Props) {
             <span className="hint">{channels.length} 个</span>
           </div>
           <div className="chan-grid">
-            {channels.map((c) => (
-              <button
-                key={`${c.name}-${c.url}`}
-                className="chan"
-                onClick={() => onPlay({ url: c.url, name: c.name, headers: c.headers ?? "" })}
-                title={c.url}
-              >
-                <span className="chan-logo">
-                  {c.logo ? (
-                    <img
-                      src={c.logo}
-                      alt=""
-                      loading="lazy"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
-                    />
-                  ) : (
-                    <b>{c.name.slice(0, 2)}</b>
-                  )}
-                </span>
-                <span className="chan-name">{c.name}</span>
-              </button>
-            ))}
+            {channels.map((c) => {
+              // 同名频道往往是同一频道的多个源（IPTV 常见），点击时全部交给
+              // 后端按顺序尝试：第一个挂了自动换下一个，用户无感。
+              const urls = (active?.channels ?? [])
+                .filter((x) => x.name === c.name)
+                .map((x) => x.url);
+              return (
+                <button
+                  key={`${c.name}-${c.url}`}
+                  className="chan"
+                  onClick={() =>
+                    onPlay({ url: c.url, name: c.name, urls, headers: c.headers ?? "" })
+                  }
+                  title={c.url}
+                >
+                  <span className="chan-logo">
+                    {c.logo ? (
+                      <img
+                        src={c.logo}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <b>{c.name.slice(0, 2)}</b>
+                    )}
+                  </span>
+                  <span className="chan-name">{c.name}</span>
+                </button>
+              );
+            })}
             {channels.length === 0 && <div className="empty">没有匹配的频道</div>}
           </div>
         </div>

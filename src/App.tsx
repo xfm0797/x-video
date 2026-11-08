@@ -103,9 +103,14 @@ export default function App() {
   );
 
   const playLive = useCallback(
-    async (ch: { url: string; name: string; headers?: string }) => {
+    async (ch: { url: string; name: string; urls?: string[]; headers?: string }) => {
       try {
-        await api.openLive({ url: ch.url, name: ch.name, headers: ch.headers ?? "" });
+        await api.openLive({
+          url: ch.url,
+          urls: ch.urls,
+          name: ch.name,
+          headers: ch.headers ?? "",
+        });
         setPlaying({ kind: "live", title: ch.name, url: ch.url });
       } catch (e) {
         toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);

@@ -37,6 +37,8 @@ pub struct State {
     pub lib_path: String,
     pub lib_error: Option<String>,
     pub loaded: bool,
+    /// mpv 真正完成加载（FILE_LOADED）后才为 true；open() 时清零。
+    pub ready: bool,
     pub playing: bool,
     pub position: f64,
     pub duration: f64,
@@ -57,6 +59,11 @@ pub struct State {
     pub sub_id: Option<i64>,
     pub eof: bool,
     pub error: Option<String>,
+    /// mpv 日志里的原始失败信息（error 为友好归因时的依据）。
+    pub error_detail: Option<String>,
+    /// 最近一次 loadfile 之后的 mpv 日志（warn+），用于失败归因；不进 API。
+    #[serde(skip)]
+    pub logs: Vec<String>,
 }
 
 struct Inner {
@@ -177,6 +184,7 @@ impl Player {
 
     fn apply_defaults(&self) {
         let Some(inner) = &self.inner else { return };
+        let _ = inner.mpv.request_log_messages("warn");
         let props: &[(&str, i32)] = &[
             ("time-pos", sys::FORMAT_DOUBLE),
             ("duration", sys::FORMAT_DOUBLE),
@@ -216,16 +224,25 @@ impl Player {
         {
             let mut s = self.state.lock().unwrap();
             s.loaded = true;
+            s.ready = false;
             s.eof = false;
             s.error = None;
+            s.error_detail = None;
+            s.logs.clear();
             s.position = start.max(0.0);
             s.path = target.to_string();
             s.title = Path::new(target)
                 .file_stem()
                 .map(|x| x.to_string_lossy().into_owned())
                 .unwrap_or_else(|| target.to_string());
+            // 上一文件的探测结果对新文件没有意义，全部清掉，避免误导界面
+            s.duration = 0.0;
             s.width = 0;
             s.height = 0;
+            s.vcodec.clear();
+            s.acodec.clear();
+            s.container.clear();
+            s.hwid.clear();
             s.audio_tracks.clear();
             s.sub_tracks.clear();
         }
@@ -243,8 +260,46 @@ impl Player {
     /// `Referer: https://a/,User-Agent: xxx`，空串表示不带。
     pub fn open_with(&self, target: &str, start: f64, headers: &str) -> Result<()> {
         let inner = self.inner()?;
-        let _ = inner.mpv.option("http-header-fields", headers.trim());
+        // User-Agent 单独走 mpv 的 user-agent 选项，避免和默认 UA 重复发送
+        let mut rest: Vec<&str> = Vec::new();
+        for part in headers.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let lower = part.to_ascii_lowercase();
+            if let Some(v) = lower.strip_prefix("user-agent:") {
+                let v = part[part.len() - v.len()..].trim();
+                if !v.is_empty() {
+                    let _ = inner.mpv.option("user-agent", v);
+                }
+                continue;
+            }
+            rest.push(part);
+        }
+        let _ = inner.mpv.option("http-header-fields", &rest.join(","));
         self.open(target, start)
+    }
+
+    /// 等待当前 loadfile 真正出画面/出声（FILE_LOADED）或报错。
+    /// 返回 true 表示加载成功；false 表示超时或失败（失败时 state.error 有值）。
+    pub fn wait_ready(&self, timeout_secs: f64) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_secs);
+        loop {
+            {
+                let s = self.state.lock().unwrap();
+                if s.ready {
+                    return true;
+                }
+                if s.error.is_some() {
+                    return false;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
 
     /// 只补一条到播放列表尾部，用于连续播放时预取。
@@ -354,11 +409,22 @@ impl Player {
         inner.mpv.command(&["stop"])?;
         if let Ok(mut s) = self.state.lock() {
             s.loaded = false;
+            s.ready = false;
             s.playing = false;
             s.eof = false;
             s.position = 0.0;
         }
         Ok(())
+    }
+
+    /// 由上层在多候选地址全部失败后写入汇总错误（播放页展示用）。
+    pub fn set_play_error(&self, msg: String, detail: Option<String>) {
+        if let Ok(mut s) = self.state.lock() {
+            s.loaded = false;
+            s.ready = false;
+            s.error = Some(msg);
+            s.error_detail = detail;
+        }
     }
 
     pub fn refresh_tracks(&self) {
@@ -419,6 +485,11 @@ fn playback_options(surface: isize) -> Vec<(&'static str, String)> {
         // 网络流：默认缓存策略在直播上容易卡顿，这里显式打开并放宽超时
         ("cache", "yes".into()),
         ("network-timeout", "30".into()),
+        // 很多 IPTV/防盗链服务器会拒绝 mpv 的默认 UA；频道自带 UA 时会被覆盖
+        (
+            "user-agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36".into(),
+        ),
     ];
     if surface != 0 {
         opts.push(("wid", surface.to_string()));
@@ -441,6 +512,7 @@ fn event_loop(inner: Arc<Inner>, state: Arc<Mutex<State>>, stop: Arc<AtomicBool>
                 let audio = inner.tracks();
                 let mut s = state.lock().unwrap();
                 s.loaded = true;
+                s.ready = true;
                 s.eof = false;
                 s.error = None;
                 s.playing = !inner.mpv.get_flag("pause").unwrap_or(false);
@@ -466,9 +538,50 @@ fn event_loop(inner: Arc<Inner>, state: Arc<Mutex<State>>, stop: Arc<AtomicBool>
                 let end = unsafe { &*(ev.data as *const sys::MpvEventEndFile) };
                 let mut s = state.lock().unwrap();
                 s.playing = false;
+                s.ready = false;
                 s.eof = end.reason == 0;
                 if end.reason == 4 {
-                    s.error = Some("文件无法播放（格式或编码不受支持）".into());
+                    let detail = s.logs.join("\n");
+                    let mpv_err = inner.mpv.api.error_text(end.error);
+                    s.error = Some(friendly_play_error(&detail, end.error, &mpv_err));
+                    s.error_detail = if detail.is_empty() {
+                        None
+                    } else {
+                        Some(detail)
+                    };
+                }
+            }
+            sys::EVENT_LOG_MESSAGE => {
+                let msg = unsafe { &*(ev.data as *const sys::MpvEventLogMessage) };
+                let (prefix, _level, text) = unsafe {
+                    (
+                        if msg.prefix.is_null() {
+                            std::borrow::Cow::Borrowed("")
+                        } else {
+                            std::ffi::CStr::from_ptr(msg.prefix).to_string_lossy()
+                        },
+                        if msg.level.is_null() {
+                            std::borrow::Cow::Borrowed("")
+                        } else {
+                            std::ffi::CStr::from_ptr(msg.level).to_string_lossy()
+                        },
+                        if msg.text.is_null() {
+                            std::borrow::Cow::Borrowed("")
+                        } else {
+                            std::ffi::CStr::from_ptr(msg.text).to_string_lossy()
+                        },
+                    )
+                };
+                let line = format!("[{prefix}] {text}").trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Ok(mut s) = state.lock() {
+                    s.logs.push(line);
+                    let n = s.logs.len();
+                    if n > 12 {
+                        s.logs.drain(0..n - 12);
+                    }
                 }
             }
             sys::EVENT_PROPERTY_CHANGE => {
@@ -513,4 +626,33 @@ fn event_loop(inner: Arc<Inner>, state: Arc<Mutex<State>>, stop: Arc<AtomicBool>
             _ => {}
         }
     }
+}
+
+/// 把 mpv 失败时的日志归因成人话。IPTV 场景里绝大多数失败是网络/防盗链，
+/// 而不是真的编码不支持——旧版一律显示「格式或编码不受支持」误导性太强。
+fn friendly_play_error(detail: &str, code: i32, mpv_err: &str) -> String {
+    let d = detail.to_lowercase();
+    if d.contains("timed out") || d.contains("timeout") || d.contains("operation timed out") {
+        return "连接超时：直播源不可达（源已下线，或当前网络无法访问它）".into();
+    }
+    if d.contains("connection refused") || d.contains("connection reset") {
+        return "连接被服务器拒绝：直播源可能已下线".into();
+    }
+    if d.contains("could not resolve") || d.contains("name or service not known") || d.contains("no address") {
+        return "域名解析失败：直播源域名无效".into();
+    }
+    if d.contains("403") || d.contains("forbidden") || d.contains("authentication") {
+        return "服务器拒绝访问（403）：可能需要特定 User-Agent / Referer，或该网络被限制".into();
+    }
+    if d.contains("404") || d.contains("not found") {
+        return "直播地址已失效（404）".into();
+    }
+    if d.contains("unsupported") || d.contains("unknown format") || d.contains("codec") || d.contains("decoder") {
+        return "文件无法播放（格式或编码不受支持）".into();
+    }
+    if code != 0 {
+        // 带上 mpv 自己的错误码文案，至少不是一句含糊的「不支持」
+        return format!("播放失败：{mpv_err}");
+    }
+    "播放失败：直播源无法打开".into()
 }
