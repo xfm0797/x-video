@@ -21,6 +21,21 @@ use xv_app::{App, PlayerPrefs, Rect};
 
 pub mod sources_api;
 
+/// 内置订阅：项目自建、每天自动实测可用性的源（见 `tools/sourcegen`）。
+/// 首次启动会自动添加，用户删掉后不会再加回来。
+pub const BUILTIN_SUBS: &[(&str, &str, &str)] = &[
+    (
+        "自建直播源",
+        "https://cdn.jsdelivr.net/gh/xfm0797/x-video@sources/iptv.m3u",
+        "iptv",
+    ),
+    (
+        "自建影视源",
+        "https://cdn.jsdelivr.net/gh/xfm0797/x-video@sources/vod.json",
+        "tvbox",
+    ),
+];
+
 pub struct ApiError(String);
 
 impl ApiError {
@@ -532,6 +547,25 @@ async fn fs_list(Query(q): Query<FsQuery>) -> ApiResult {
 pub async fn serve(app: Arc<App>, port: u16) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!("[xv] http://127.0.0.1:{port}");
+
+    // 首次启动挂上自建订阅源，装完就能看；删掉后不再自动加回（用设置里的标记位记录）。
+    let seed = Arc::clone(&app);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        if seed.library.get_setting("sources_seeded").ok().flatten().as_deref() == Some("1") {
+            return;
+        }
+        if !seed.sources.subs().is_empty() {
+            let _ = seed.library.set_setting("sources_seeded", "1");
+            return;
+        }
+        for (name, url, kind) in crate::BUILTIN_SUBS {
+            if let Err(e) = seed.sources.add(name, url, kind).await {
+                eprintln!("[sources] 内置订阅 {name} 添加失败：{e:#}");
+            }
+        }
+        let _ = seed.library.set_setting("sources_seeded", "1");
+    });
 
     // 订阅超过 6 小时没刷新就后台更新一次；先让首屏和初始轮询跑完，避免抢带宽/连接。
     let warm = Arc::clone(&app);

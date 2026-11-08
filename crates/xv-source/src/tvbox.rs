@@ -314,6 +314,17 @@ fn to_detail(v: &Value) -> VodDetail {
         sources.push(PlaySource { from, episodes });
     }
 
+    // 采集站的第 1 条线路经常是分享页（`/share/xxx`、`/play/xxx`），直接播会失败；
+    // 把「首集就是真实流地址」的线路排前面，播放页默认就能选中能播的那条。
+    sources.sort_by_key(|p| {
+        let streamish = p
+            .episodes
+            .first()
+            .map(|e| looks_like_stream(&e.url))
+            .unwrap_or(false);
+        std::cmp::Reverse(streamish)
+    });
+
     VodDetail {
         id: s(v, "vod_id"),
         name: s(v, "vod_name"),
@@ -328,8 +339,22 @@ fn to_detail(v: &Value) -> VodDetail {
     }
 }
 
-fn s(v: &Value, key: &str) -> String {
-    match v.get(key) {
+/// 粗判一个播放地址是不是「能直接喂给播放器」的流，而不是需要解析的分享页。
+fn looks_like_stream(url: &str) -> bool {
+    let u = url.trim().to_ascii_lowercase();
+    if !u.starts_with("http://") && !u.starts_with("https://") {
+        return false;
+    }
+    let path = u.split('?').next().unwrap_or(&u);
+    path.ends_with(".m3u8")
+        || path.ends_with(".mp4")
+        || path.ends_with(".flv")
+        || path.ends_with(".ts")
+        || path.ends_with(".mpd")
+        || path.ends_with(".mkv")
+}
+
+fn s(v: &Value, key: &str) -> String {    match v.get(key) {
         Some(Value::String(x)) => x.trim().to_string(),
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::Bool(b)) => b.to_string(),
