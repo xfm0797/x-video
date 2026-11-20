@@ -398,8 +398,9 @@ async fn player_open_url(State(app): State<Arc<App>>, Json(req): Json<OpenUrlReq
         return Err(ApiError::msg("缺少播放地址"));
     }
     let headers = req.headers;
+    let key = url.clone();
     let app2 = app.clone();
-    tokio::task::spawn_blocking(move || app2.play_url(&url, &headers))
+    tokio::task::spawn_blocking(move || app2.play_url_keyed(&url, &headers, &key))
         .await
         .map_err(|e| ApiError::msg(e.to_string()))??;
     app.player().refresh_tracks();

@@ -268,16 +268,19 @@ pub async fn open_vod(State(app): State<Arc<App>>, Json(req): Json<OpenVodReq>) 
     // site 为空表示直接播放一个网络地址（直链 / HLS），不经过站点解析。
     if req.site.is_empty() {
         let url = req.url.clone();
-        tokio::task::spawn_blocking(move || app.play_url(&url, ""))
+        let key = url.clone();
+        tokio::task::spawn_blocking(move || app.play_url_keyed(&url, "", &key))
             .await
             .map_err(|e| ApiError::msg(e.to_string()))??;
         return Ok(Json(json!({ "ok": true, "url": req.url })));
     }
     let (sub, key) = split_site(&req.site)?;
+    // 用「站点 + 线路 + 剧集页地址」做续播键，避免依赖会过期的解析直链。
+    let resume_key = format!("vod:{}:{}:{}", req.site, req.flag, req.url);
     let resolved = app.sources.resolve(sub, key, &req.flag, &req.url).await?;
     let headers = xv_source::http::mpv_header_fields(&resolved.headers);
     let url = resolved.url.clone();
-    tokio::task::spawn_blocking(move || app.play_url(&url, &headers))
+    tokio::task::spawn_blocking(move || app.play_url_keyed(&url, &headers, &resume_key))
         .await
         .map_err(|e| ApiError::msg(e.to_string()))??;
     Ok(Json(json!({ "ok": true, "url": resolved.url })))

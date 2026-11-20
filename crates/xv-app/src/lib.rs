@@ -37,6 +37,9 @@ pub struct Session {
     pub eof_handled: bool,
     #[serde(skip)]
     pub last_saved: f64,
+    /// 当前在线播放的续播键；本地播放时为 None。
+    #[serde(skip)]
+    pub online_key: Option<String>,
 }
 
 impl Default for Session {
@@ -50,6 +53,7 @@ impl Default for Session {
             rect: Rect::default(),
             eof_handled: false,
             last_saved: 0.0,
+            online_key: None,
         }
     }
 }
@@ -283,6 +287,7 @@ impl App {
         let index = queue.iter().position(|id| *id == item_id).unwrap_or(0);
 
         let resume = start.unwrap_or(item.position);
+        self.flush_online_progress();
         {
             let mut s = self.session.lock().unwrap();
             s.item_id = Some(item_id);
@@ -291,6 +296,7 @@ impl App {
             s.index = index;
             s.eof_handled = false;
             s.last_saved = resume;
+            s.online_key = None;
             let mode = self.prefs.lock().map(|p| p.mode.clone()).unwrap_or_default();
             if !mode.is_empty() {
                 s.mode = mode;
@@ -311,21 +317,52 @@ impl App {
         if let Some(item) = self.library.item_by_path(path)? {
             return self.play_item(item.id, None);
         }
+        self.flush_online_progress();
         {
             let mut s = self.session.lock().unwrap();
             s.item_id = None;
+            s.series_id = None;
             s.queue = Vec::new();
             s.index = 0;
             s.eof_handled = false;
+            s.online_key = None;
         }
         let player = self.player();
         player.open(path, 0.0)?;
         Ok(())
     }
 
-    /// 播放一个网络地址（直播频道 / 在线影视 / 直链）。不进入本地队列。
-    pub fn play_url(&self, url: &str, headers: &str) -> Result<()> {
-        self.play_candidates(&[url.to_string()], headers)
+    /// 把当前在线播放位置立即落盘，然后清空在线续播键。
+    fn flush_online_progress(&self) {
+        let key = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .online_key
+            .clone();
+        let Some(key) = key else { return };
+        let player = self
+            .player
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .cloned();
+        if let Some(player) = player {
+            let st = player.state();
+            let _ = self.library.save_online_progress(&key, st.position, st.duration);
+        }
+        if let Ok(mut s) = self.session.lock() {
+            s.online_key = None;
+            s.last_saved = 0.0;
+        }
+    }
+
+    /// 带续播键的在线播放；key 为空表示不记忆进度（直播）。
+    pub fn play_url_keyed(&self, url: &str, headers: &str, key: &str) -> Result<()> {
+        // 先落盘当前进度，再查询续播点：重开同一集时能接上最新位置。
+        self.flush_online_progress();
+        let resume = self.library.online_resume(key).ok().flatten().unwrap_or(0.0);
+        self.play_candidates_inner(&[url.to_string()], headers, resume, key)
             .map(|_| ())
     }
 
@@ -333,6 +370,17 @@ impl App {
     /// 失败自动切下一个。IPTV 的「频道名,url1#url2#url3」多源就是为这个准备的。
     /// 返回成功命中的候选下标。
     pub fn play_candidates(&self, urls: &[String], headers: &str) -> Result<usize> {
+        self.play_candidates_inner(urls, headers, 0.0, "")
+    }
+
+    fn play_candidates_inner(
+        &self,
+        urls: &[String],
+        headers: &str,
+        resume: f64,
+        key: &str,
+    ) -> Result<usize> {
+        self.flush_online_progress();
         // 去重、去空，最多 4 个，别让一次点击卡太久
         let mut cands: Vec<String> = Vec::new();
         for u in urls {
@@ -346,6 +394,7 @@ impl App {
         }
         anyhow::ensure!(!cands.is_empty(), "没有可播放的地址");
 
+        let key = key.trim();
         {
             let mut s = self.session.lock().unwrap_or_else(|e| e.into_inner());
             s.item_id = None;
@@ -353,6 +402,12 @@ impl App {
             s.queue.clear();
             s.index = 0;
             s.eof_handled = true; // 网络流不参与自动连播
+            s.last_saved = resume;
+            s.online_key = if key.is_empty() {
+                None
+            } else {
+                Some(key.to_string())
+            };
         }
         let player = self.player();
         if !player.available() {
@@ -365,7 +420,7 @@ impl App {
         let mut fails: Vec<String> = Vec::new();
         let mut raws: Vec<String> = Vec::new();
         for (i, url) in cands.iter().enumerate() {
-            player.open_with(url, 0.0, headers)?;
+            player.open_with(url, if i == 0 { resume } else { 0.0 }, headers)?;
             if player.wait_ready(10.0) {
                 return Ok(i);
             }
@@ -456,14 +511,27 @@ impl App {
             }
         };
         let st = player.state();
-        let (item_id, mode) = {
+        let (item_id, online_key, mode, last_saved) = {
             let s = self.session.lock().unwrap_or_else(|e| e.into_inner());
-            (s.item_id, s.mode.clone())
+            (s.item_id, s.online_key.clone(), s.mode.clone(), s.last_saved)
         };
 
         if let Some(id) = item_id {
-            if st.position > 1.0 && st.position - self.session.lock().unwrap().last_saved >= 4.0 {
+            if st.position > 1.0 && st.position - last_saved >= 4.0 {
                 let _ = self.library.save_progress(id, st.position, st.duration);
+                if let Ok(mut s) = self.session.lock() {
+                    s.last_saved = st.position;
+                }
+            }
+        } else if let Some(key) = online_key {
+            // 在线播放：每 4 秒落一次；EOF 时强制写最后一笔。
+            if st.position > 1.0
+                && st.duration > 0.0
+                && (st.eof || st.position - last_saved >= 4.0)
+            {
+                let _ = self
+                    .library
+                    .save_online_progress(&key, st.position, st.duration);
                 if let Ok(mut s) = self.session.lock() {
                     s.last_saved = st.position;
                 }
@@ -506,9 +574,18 @@ impl App {
         if let Ok(mut guard) = self.player.lock() {
             if let Some(p) = guard.take() {
                 let st = p.state();
-                let id = self.session.lock().ok().and_then(|s| s.item_id);
+                let (id, key) = self
+                    .session
+                    .lock()
+                    .ok()
+                    .map(|s| (s.item_id, s.online_key.clone()))
+                    .unwrap_or((None, None));
                 if let Some(id) = id {
                     let _ = self.library.save_progress(id, st.position, st.duration);
+                } else if let Some(key) = key {
+                    let _ = self
+                        .library
+                        .save_online_progress(&key, st.position, st.duration);
                 }
                 p.shutdown();
             }

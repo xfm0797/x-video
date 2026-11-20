@@ -129,6 +129,13 @@ impl Library {
               finished INTEGER NOT NULL DEFAULT 0,
               updated_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS online_progress(
+              key TEXT PRIMARY KEY,
+              position REAL NOT NULL,
+              duration REAL NOT NULL,
+              finished INTEGER NOT NULL DEFAULT 0,
+              updated_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS root(
               id INTEGER PRIMARY KEY,
               path TEXT NOT NULL UNIQUE,
@@ -391,6 +398,59 @@ impl Library {
         Ok(())
     }
 
+    /// 在线播放进度：key 由调用方保证稳定（直链用 URL，站点用站点+线路+剧集地址）。
+    pub fn save_online_progress(&self, key: &str, position: f64, duration: f64) -> Result<()> {
+        let key = key.trim();
+        if key.is_empty() || position < 1.0 || duration <= 0.0 {
+            return Ok(());
+        }
+        let finished = position >= duration * 0.97;
+        let conn = self.conn();
+        conn.execute(
+            r#"
+            INSERT INTO online_progress(key, position, duration, finished, updated_at)
+            VALUES(?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(key) DO UPDATE SET
+              position = excluded.position,
+              duration = excluded.duration,
+              finished = excluded.finished,
+              updated_at = excluded.updated_at
+            "#,
+            params![key, position, duration, i64::from(finished), now()],
+        )?;
+        Ok(())
+    }
+
+    /// 返回可续播位置；未看过、已看完或时长为 0（直播）时返回 None。
+    pub fn online_resume(&self, key: &str) -> Result<Option<f64>> {
+        let key = key.trim();
+        if key.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn();
+        let row = conn
+            .query_row(
+                "SELECT position, duration, finished FROM online_progress WHERE key = ?1",
+                params![key],
+                |r| {
+                    Ok((
+                        r.get::<_, f64>(0)?,
+                        r.get::<_, f64>(1)?,
+                        r.get::<_, i64>(2)? != 0,
+                    ))
+                },
+            )
+            .ok();
+        Ok(match row {
+            Some((position, duration, false))
+                if duration > 0.0 && position > 5.0 && position < duration * 0.97 =>
+            {
+                Some(position)
+            }
+            _ => None,
+        })
+    }
+
     // ---------- 设置 ----------
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
@@ -510,4 +570,28 @@ fn map_item(r: &Row) -> rusqlite::Result<ItemRow> {
         acodec: r.get(15)?,
         container: r.get(16)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn online_progress_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("xv-library-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let lib = Library::open(&dir).unwrap();
+        let key = "https://example.com/video.m3u8";
+
+        lib.save_online_progress(key, 30.0, 100.0).unwrap();
+        assert_eq!(lib.online_resume(key).unwrap(), Some(30.0));
+
+        // 接近结尾视为看完，下次从头播
+        lib.save_online_progress(key, 99.0, 100.0).unwrap();
+        assert_eq!(lib.online_resume(key).unwrap(), None);
+
+        // 直播 / 未知时长不记忆
+        lib.save_online_progress("live", 30.0, 0.0).unwrap();
+        assert_eq!(lib.online_resume("live").unwrap(), None);
+    }
 }

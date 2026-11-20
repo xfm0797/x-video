@@ -21,6 +21,10 @@ use std::thread::JoinHandle;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
+/// 默认 UA：很多 IPTV/防盗链服务器会拒绝 mpv 的默认 UA。
+pub const DEFAULT_UA: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Track {
     pub id: i64,
@@ -261,6 +265,7 @@ impl Player {
     pub fn open_with(&self, target: &str, start: f64, headers: &str) -> Result<()> {
         let inner = self.inner()?;
         // User-Agent 单独走 mpv 的 user-agent 选项，避免和默认 UA 重复发送
+        let mut ua: Option<&str> = None;
         let mut rest: Vec<&str> = Vec::new();
         for part in headers.split(',') {
             let part = part.trim();
@@ -271,12 +276,14 @@ impl Player {
             if let Some(v) = lower.strip_prefix("user-agent:") {
                 let v = part[part.len() - v.len()..].trim();
                 if !v.is_empty() {
-                    let _ = inner.mpv.option("user-agent", v);
+                    ua = Some(v);
                 }
                 continue;
             }
             rest.push(part);
         }
+        // 每次开播都显式下发 UA：没有自定义 UA 时回到默认值，避免上一次的自定义 UA 泄漏到后续播放
+        let _ = inner.mpv.option("user-agent", ua.unwrap_or(DEFAULT_UA));
         let _ = inner.mpv.option("http-header-fields", &rest.join(","));
         self.open(target, start)
     }
@@ -486,10 +493,7 @@ fn playback_options(surface: isize) -> Vec<(&'static str, String)> {
         ("cache", "yes".into()),
         ("network-timeout", "30".into()),
         // 很多 IPTV/防盗链服务器会拒绝 mpv 的默认 UA；频道自带 UA 时会被覆盖
-        (
-            "user-agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36".into(),
-        ),
+        ("user-agent", DEFAULT_UA.to_string()),
     ];
     if surface != 0 {
         opts.push(("wid", surface.to_string()));

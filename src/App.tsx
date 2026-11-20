@@ -63,6 +63,7 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState("");
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlInput, setUrlInput] = useState("");
+  const [urlUa, setUrlUa] = useState(() => localStorage.getItem("xv.direct.ua") ?? "");
   const [sourceStamp, setSourceStamp] = useState(0);
   const toastTimer = useRef(0);
   const statusBusy = useRef(false);
@@ -154,8 +155,11 @@ export default function App() {
   const playDirectUrl = useCallback(async () => {
     const url = urlInput.trim();
     if (!url) return;
+    const ua = urlUa.trim();
+    const headers = ua ? `User-Agent: ${ua.replace(/,/g, " ")}` : "";
     try {
-      await api.openUrl({ url });
+      await api.openUrl({ url, headers });
+      localStorage.setItem("xv.direct.ua", ua);
       setPlaying({
         kind: "online",
         title: url,
@@ -172,7 +176,7 @@ export default function App() {
     } catch (e) {
       toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
     }
-  }, [urlInput, toast]);
+  }, [urlInput, urlUa, toast]);
 
   const go = (v: View) => {
     setView(v);
@@ -337,7 +341,7 @@ export default function App() {
             </button>
             <h2>打开网络链接</h2>
             <p className="hint">
-              支持 HTTP(S) 直链、HLS（m3u8）、RTSP 等地址，使用内置播放内核直接播放。
+              支持 HTTP(S) 直链、HLS（m3u8）、RTSP 等地址；再次打开同一地址会从上次位置继续。
             </p>
             <div className="url-row">
               <input
@@ -357,6 +361,17 @@ export default function App() {
                 播放
               </button>
             </div>
+            <label className="url-field">
+              <span>User-Agent（可选）</span>
+              <input
+                className="input"
+                value={urlUa}
+                onChange={(e) => setUrlUa(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && playDirectUrl()}
+                placeholder="留空使用播放器默认 UA，例如 Mozilla/5.0 ..."
+                spellCheck={false}
+              />
+            </label>
           </div>
         </div>
       )}
