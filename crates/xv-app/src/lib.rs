@@ -606,7 +606,8 @@ impl App {
                     true
                 }
             };
-            if should_advance && mode != "stop" {
+            // 只有本地队列由后端推进；在线剧集由前端按当前线路队列推进，避免两边竞争。
+            if should_advance && mode != "stop" && item_id.is_some() {
                 if let Some(id) = item_id {
                     if let Ok(Some(item)) = self.library.item(id) {
                         let _ = self
@@ -619,6 +620,8 @@ impl App {
                     let _ = player.set_pause(false);
                     if let Ok(mut s) = self.session.lock() {
                         s.eof_handled = false;
+                        // 重播从头开始：归零落盘基线，否则整轮重播都不会再写进度。
+                        s.last_saved = 0.0;
                     }
                 } else {
                     let _ = self.next(true);
