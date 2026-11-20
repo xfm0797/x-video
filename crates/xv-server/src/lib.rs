@@ -419,9 +419,16 @@ struct CmdReq {
 async fn player_cmd(State(app): State<Arc<App>>, Json(req): Json<CmdReq>) -> ApiResult {
     let player = app.player();
     match req.cmd.as_str() {
-        "toggle" => player.play_pause()?,
+        "toggle" => {
+            player.play_pause()?;
+            // 暂停/播放切换时即时落盘，符合规格「暂停即时落盘」。
+            app.save_progress_now();
+        }
         "play" => player.set_pause(false)?,
-        "pause" => player.set_pause(true)?,
+        "pause" => {
+            player.set_pause(true)?;
+            app.save_progress_now();
+        }
         "seek" => player.seek(req.value.unwrap_or(0.0), true)?,
         "seek_rel" => player.seek(req.value.unwrap_or(0.0), false)?,
         "volume" => {

@@ -287,7 +287,8 @@ impl App {
         let index = queue.iter().position(|id| *id == item_id).unwrap_or(0);
 
         let resume = start.unwrap_or(item.position);
-        self.flush_online_progress();
+        // 切集/重开前先落盘上一个条目的进度（本地与在线）。
+        self.save_progress_now();
         {
             let mut s = self.session.lock().unwrap();
             s.item_id = Some(item_id);
@@ -317,7 +318,7 @@ impl App {
         if let Some(item) = self.library.item_by_path(path)? {
             return self.play_item(item.id, None);
         }
-        self.flush_online_progress();
+        self.save_progress_now();
         {
             let mut s = self.session.lock().unwrap();
             s.item_id = None;
@@ -357,29 +358,46 @@ impl App {
         }
     }
 
-    /// 关闭播放器：先把进度立刻落盘（本地 / 在线），再停止内核并清空会话。
-    /// 避免返回媒体库后仍在后台出声，也避免丢掉最后几秒进度。
-    pub fn stop(&self) -> Result<()> {
+    /// 把当前本地播放位置立即落盘（暂停 / 切集 / 退出时调用）。
+    fn flush_local_progress(&self) {
         let item_id = {
             let s = self.session.lock().unwrap_or_else(|e| e.into_inner());
             s.item_id
         };
+        let Some(id) = item_id else { return };
         let player = self
             .player
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .cloned();
-        if let Some(p) = player.as_ref() {
-            if let Some(id) = item_id {
-                let st = p.state();
-                if st.position > 1.0 {
-                    let _ = self.library.save_progress(id, st.position, st.duration);
+        if let Some(player) = player {
+            let st = player.state();
+            if st.position > 1.0 {
+                let _ = self.library.save_progress(id, st.position, st.duration);
+                if let Ok(mut s) = self.session.lock() {
+                    s.last_saved = st.position;
                 }
             }
         }
-        // 在线进度：内部按 online_key 落盘并清除。
+    }
+
+    /// 立即把本地与在线进度落盘（暂停、切集等关键时刻，规格要求即时落盘）。
+    pub fn save_progress_now(&self) {
+        self.flush_local_progress();
         self.flush_online_progress();
+    }
+
+    /// 关闭播放器：先把进度立刻落盘（本地 / 在线），再停止内核并清空会话。
+    /// 避免返回媒体库后仍在后台出声，也避免丢掉最后几秒进度。
+    pub fn stop(&self) -> Result<()> {
+        self.save_progress_now();
+        let player = self
+            .player
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .cloned();
         let stop_res = match player.as_ref() {
             Some(p) => p.stop(),
             None => Ok(()),
@@ -400,7 +418,7 @@ impl App {
     /// 返回实际用于续播的起始秒数（0 表示从头开始），便于前端提示用户。
     pub fn play_url_keyed(&self, url: &str, headers: &str, key: &str) -> Result<f64> {
         // 先落盘当前进度，再查询续播点：重开同一集时能接上最新位置。
-        self.flush_online_progress();
+        self.save_progress_now();
         let resume = self.library.online_resume(key).ok().flatten().unwrap_or(0.0);
         self.play_candidates_inner(&[url.to_string()], headers, resume, key)?;
         Ok(resume)
@@ -420,7 +438,7 @@ impl App {
         resume: f64,
         key: &str,
     ) -> Result<usize> {
-        self.flush_online_progress();
+        self.save_progress_now();
         // 去重、去空，最多 4 个，别让一次点击卡太久
         let mut cands: Vec<String> = Vec::new();
         for u in urls {
