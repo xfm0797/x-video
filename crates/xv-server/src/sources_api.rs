@@ -265,6 +265,14 @@ pub struct OpenVodReq {
 }
 
 pub async fn open_vod(State(app): State<Arc<App>>, Json(req): Json<OpenVodReq>) -> ApiResult {
+    // site 为空表示直接播放一个网络地址（直链 / HLS），不经过站点解析。
+    if req.site.is_empty() {
+        let url = req.url.clone();
+        tokio::task::spawn_blocking(move || app.play_url(&url, ""))
+            .await
+            .map_err(|e| ApiError::msg(e.to_string()))??;
+        return Ok(Json(json!({ "ok": true, "url": req.url })));
+    }
     let (sub, key) = split_site(&req.site)?;
     let resolved = app.sources.resolve(sub, key, &req.flag, &req.url).await?;
     let headers = xv_source::http::mpv_header_fields(&resolved.headers);

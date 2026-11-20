@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type VodDetail, type VodHit, type VodSite } from "../lib/api";
+import { api, type OnlinePlayback, type VodDetail, type VodHit, type VodSite } from "../lib/api";
 import { Icon } from "../components/Icon";
 
 type Props = {
-  onPlay: (title: string) => void;
+  onPlay: (playback: OnlinePlayback) => Promise<boolean>;
   onGoSources: () => void;
   toast: (msg: string) => void;
 };
@@ -20,7 +20,6 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
   const [searched, setSearched] = useState(false);
   const [detail, setDetail] = useState<{ d: VodDetail; site: string } | null>(null);
   const [srcIdx, setSrcIdx] = useState(0);
-  const [opening, setOpening] = useState("");
 
   useEffect(() => {
     api
@@ -58,12 +57,6 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (bootQuery.trim()) doSearch(bootQuery);
-    // 仅在首屏执行一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const openDetail = async (hit: VodHit) => {
     try {
       const r = await api.vodDetail(hit.site, hit.id);
@@ -74,19 +67,22 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
     }
   };
 
-  const playEpisode = async (url: string, name: string) => {
+  const playEpisode = async (url: string) => {
     if (!detail) return;
     const src = detail.d.sources[srcIdx];
-    setOpening(url);
-    try {
-      await api.vodOpen({ site: detail.site, url, flag: src?.from ?? "" });
-      onPlay(`${detail.d.name}${name ? ` · ${name}` : ""}`);
-      setDetail(null);
-    } catch (e) {
-      toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setOpening("");
-    }
+    const episodes = (src?.episodes ?? []).map((e) => ({ name: e.name, url: e.url }));
+    const index = Math.max(
+      0,
+      episodes.findIndex((e) => e.url === url)
+    );
+    const ok = await onPlay({
+      title: detail.d.name,
+      site: detail.site,
+      flag: src?.from ?? "",
+      episodes,
+      index,
+    });
+    if (ok) setDetail(null);
   };
 
   if (sites.length === 0) {
@@ -253,10 +249,9 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
                 <button
                   key={`${ep.name}-${ep.url}`}
                   className="ep"
-                  disabled={opening === ep.url}
-                  onClick={() => playEpisode(ep.url, ep.name)}
+                  onClick={() => playEpisode(ep.url)}
                 >
-                  {opening === ep.url ? "解析中…" : ep.name}
+                  {ep.name}
                 </button>
               ))}
               {episodes.length === 0 && <div className="empty">这一线路没有剧集</div>}

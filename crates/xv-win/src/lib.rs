@@ -284,4 +284,7 @@ mod stub {
 }
 
 #[cfg(not(windows))]
-pub use stub::{create_surface, destroy_surface, main_hwnd, set_fullscreen, set_surface};
+pub use stub::{
+    create as create_surface, destroy as destroy_surface, main_hwnd, set_fullscreen,
+    set_rect as set_surface,
+};

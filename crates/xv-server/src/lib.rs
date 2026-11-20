@@ -94,6 +94,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/artwork/{kind}/{id}", get(artwork))
         .route("/api/player/state", get(player_state))
         .route("/api/player/open", post(player_open))
+        .route("/api/player/open_url", post(player_open_url))
         .route("/api/player/cmd", post(player_cmd))
         .route("/api/player/rect", post(player_rect))
         .route("/api/settings", get(get_settings).post(set_settings))
@@ -379,6 +380,28 @@ async fn player_open(State(app): State<Arc<App>>, Json(req): Json<OpenReq>) -> A
     .map_err(|e| ApiError(e.to_string()))?;
     result?;
     // 开播后立刻把音轨/字幕填充好
+    app.player().refresh_tracks();
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct OpenUrlReq {
+    url: String,
+    #[serde(default)]
+    headers: String,
+}
+
+/// 直接播放一个网络直链（HTTP/HLS/RTSP），不依赖任何订阅或媒体库。
+async fn player_open_url(State(app): State<Arc<App>>, Json(req): Json<OpenUrlReq>) -> ApiResult {
+    let url = req.url.trim().to_string();
+    if url.is_empty() {
+        return Err(ApiError::msg("缺少播放地址"));
+    }
+    let headers = req.headers;
+    let app2 = app.clone();
+    tokio::task::spawn_blocking(move || app2.play_url(&url, &headers))
+        .await
+        .map_err(|e| ApiError::msg(e.to_string()))??;
     app.player().refresh_tracks();
     Ok(Json(json!({ "ok": true })))
 }

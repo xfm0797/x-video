@@ -119,6 +119,12 @@ const P: Record<string, ReactNode> = {
       <path d="M8 20h8M12 16v4" />
     </>
   ),
+  link: (
+    <>
+      <path d="M10.5 13.5a3.5 3.5 0 0 0 5 0l3-3a3.54 3.54 0 0 0-5-5l-1.2 1.2" />
+      <path d="M13.5 10.5a3.5 3.5 0 0 0-5 0l-3 3a3.54 3.54 0 0 0 5 5l1.2-1.2" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof P;

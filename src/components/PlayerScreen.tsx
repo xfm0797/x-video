@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, art, type Item, type PlaybackState } from "../lib/api";
+import { api, art, type Item, type OnlinePlayback, type PlaybackState } from "../lib/api";
 import { epLabel, fmtTime, progressPct } from "../lib/format";
 import { Icon } from "./Icon";
 
 type Props = {
   itemId?: number;
-  url?: string;
   title: string;
-  kind: "video" | "audio" | "live";
-  /** 在线点播：不参与本地队列，也不显示选集抽屉 */
-  remote?: boolean;
+  kind: "video" | "audio" | "live" | "online";
+  /** 在线点播上下文：剧集队列、当前集与线路。 */
+  online?: OnlinePlayback;
+  onPlayOnline?: (online: OnlinePlayback, index: number) => void;
   onClose: () => void;
 };
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onClose }: Props) {
-  const remote = remoteProp ?? (!!url || kind === "live");
+export function PlayerScreen({ itemId, title, kind, online, onPlayOnline, onClose }: Props) {
   const live = kind === "live";
   const [st, setSt] = useState<PlaybackState | null>(null);
   const [queue, setQueue] = useState<Item[]>([]);
@@ -24,6 +23,7 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
   const [drawer, setDrawer] = useState(false);
   const [fs, setFs] = useState(false);
   const surfRef = useRef<HTMLDivElement | null>(null);
+  const eofRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -59,6 +59,20 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
       .then((r) => setQueue(r.items))
       .catch(() => setQueue([]));
   }, [itemId]);
+
+  // 在线点播播完自动接下一集；本地队列由后端 ticker 负责推进。
+  useEffect(() => {
+    if (!online) return;
+    if (!st?.engine.eof) {
+      eofRef.current = false;
+      return;
+    }
+    if (eofRef.current) return;
+    eofRef.current = true;
+    if (online.index + 1 < online.episodes.length) {
+      onPlayOnline?.(online, online.index + 1);
+    }
+  }, [st?.engine.eof, online, onPlayOnline]);
 
   // 原生画面跟着 DOM 区域走：窗口拖动不触发 ResizeObserver，另加轮询兜底
   useEffect(() => {
@@ -128,6 +142,27 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
       return !v;
     });
   }, []);
+
+  const hasOnlineQueue = !!online && online.episodes.length > 1;
+  const hasQueue = !!itemId || hasOnlineQueue;
+  const canPrev = online ? online.index > 0 : !!itemId;
+  const canNext = online ? online.index + 1 < online.episodes.length : !!itemId;
+
+  const goPrev = useCallback(() => {
+    if (online) {
+      if (online.index > 0) onPlayOnline?.(online, online.index - 1);
+      return;
+    }
+    api.cmd("prev").catch(() => {});
+  }, [online, onPlayOnline]);
+
+  const goNext = useCallback(() => {
+    if (online) {
+      if (online.index + 1 < online.episodes.length) onPlayOnline?.(online, online.index + 1);
+      return;
+    }
+    api.cmd("next").catch(() => {});
+  }, [online, onPlayOnline]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -231,7 +266,9 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
             {live && <span className="live-pill">直播</span>}
             {engine?.title || title}
           </h3>
-          <div className="meta">{live ? "直播流 · 无进度" : meta}</div>
+          <div className="meta">
+            {live ? "直播流 · 无进度" : online ? `在线点播 · ${meta}` : meta}
+          </div>
         </div>
         <div className="kbd-hint">
           <span>
@@ -293,9 +330,11 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
           )}
         </div>
 
-        <aside className={`eps-drawer ${drawer && !remote ? "open" : ""}`}>
+        <aside className={`eps-drawer ${drawer && hasQueue ? "open" : ""}`}>
           <header>
-            <span>选集 · {queue.length}</span>
+            <span>
+              选集 · {online ? online.episodes.length : queue.length}
+            </span>
             <button
               className="cbtn"
               style={{ marginLeft: "auto" }}
@@ -305,22 +344,53 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
             </button>
           </header>
           <div className="list">
-            {queue.map((it, i) => (
-              <button
-                key={it.id}
-                className={`row-item ${it.id === itemId ? "on" : ""}`}
-                onClick={() => {
-                  api.open({ item_id: it.id });
-                  setDrawer(false);
-                }}
-              >
-                <span className="idx">{String(i + 1).padStart(2, "0")}</span>
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {epLabel(it)}
-                </span>
-                {it.finished && <Icon name="check" size={14} />}
-              </button>
-            ))}
+            {online
+              ? online.episodes.map((ep, i) => (
+                  <button
+                    key={`${ep.name}-${ep.url}`}
+                    className={`row-item ${i === online.index ? "on" : ""}`}
+                    onClick={() => {
+                      onPlayOnline?.(online, i);
+                      setDrawer(false);
+                    }}
+                  >
+                    <span className="idx">{String(i + 1).padStart(2, "0")}</span>
+                    <span
+                      style={{
+                        flex: 1,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {ep.name || `第 ${i + 1} 集`}
+                    </span>
+                    {i === online.index && <Icon name="play" size={13} />}
+                  </button>
+                ))
+              : queue.map((it, i) => (
+                  <button
+                    key={it.id}
+                    className={`row-item ${it.id === itemId ? "on" : ""}`}
+                    onClick={() => {
+                      api.open({ item_id: it.id });
+                      setDrawer(false);
+                    }}
+                  >
+                    <span className="idx">{String(i + 1).padStart(2, "0")}</span>
+                    <span
+                      style={{
+                        flex: 1,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {epLabel(it)}
+                    </span>
+                    {it.finished && <Icon name="check" size={14} />}
+                  </button>
+                ))}
           </div>
         </aside>
       </div>
@@ -354,8 +424,8 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
         </div>
 
         <div className="controls">
-          {!remote && (
-            <button className="cbtn" onClick={() => api.cmd("prev")} title="上一集">
+          {hasQueue && (
+            <button className="cbtn" onClick={goPrev} disabled={!canPrev} title="上一集">
               <Icon name="prev" />
             </button>
           )}
@@ -368,8 +438,8 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
           <button className="cbtn" onClick={() => seekBy(10)} title="前进 10 秒">
             <Icon name="fwd10" />
           </button>
-          {!remote && (
-            <button className="cbtn" onClick={() => api.cmd("next")} title="下一集">
+          {hasQueue && (
+            <button className="cbtn" onClick={goNext} disabled={!canNext} title="下一集">
               <Icon name="next" />
             </button>
           )}
@@ -413,7 +483,7 @@ export function PlayerScreen({ itemId, url, title, kind, remote: remoteProp, onC
             >
               {subLabel}
             </button>
-            {!remote && (
+            {hasQueue && (
               <button
                 className="cbtn"
                 onClick={() => setDrawer((v) => !v)}

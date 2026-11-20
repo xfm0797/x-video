@@ -173,6 +173,16 @@ export type VodHit = {
 export type VodEpisode = { name: string; url: string };
 export type VodSource = { from: string; episodes: VodEpisode[] };
 
+/** 一次在线播放的完整上下文：站点、线路、剧集队列与当前集。 */
+export type OnlinePlayback = {
+  title: string;
+  /** `订阅ID|站点KEY`；空字符串表示直接播放网络直链 */
+  site: string;
+  flag: string;
+  episodes: VodEpisode[];
+  index: number;
+};
+
 export type VodDetail = {
   id: string;
   name: string;
@@ -264,6 +274,8 @@ export const api = {
   state: () => get<PlaybackState>("/api/player/state"),
   open: (body: { item_id?: number; path?: string; start?: number }) =>
     post<{ ok: boolean }>("/api/player/open", body),
+  openUrl: (body: { url: string; headers?: string }) =>
+    post<{ ok: boolean }>("/api/player/open_url", body, 60_000),
   cmd: (cmd: string, opts: { value?: number; text?: string; id?: number } = {}) =>
     post<{ ok: boolean }>("/api/player/cmd", { cmd, ...opts }),
   rect: (r: { x: number; y: number; w: number; h: number; visible: boolean }) =>

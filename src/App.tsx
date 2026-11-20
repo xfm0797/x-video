@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Status } from "./lib/api";
+import { api, type OnlinePlayback, type Status } from "./lib/api";
 import { Icon, type IconName } from "./components/Icon";
 import { PlayerScreen } from "./components/PlayerScreen";
 import { Movies } from "./pages/Movies";
@@ -16,7 +16,7 @@ type View = "movies" | "online" | "live" | "shorts" | "music" | "files" | "sourc
 
 const NAV: { key: View; label: string; icon: IconName }[] = [
   { key: "movies", label: "影视", icon: "film" },
-  { key: "online", label: "在线影视", icon: "cloud" },
+  { key: "online", label: "在线点播", icon: "cloud" },
   { key: "live", label: "直播", icon: "live" },
   { key: "shorts", label: "短剧", icon: "shorts" },
   { key: "music", label: "音乐", icon: "music" },
@@ -26,8 +26,8 @@ const NAV: { key: View; label: string; icon: IconName }[] = [
 ];
 
 const TITLES: Record<View, { title: string; sub: string }> = {
-  movies: { title: "影视库", sub: "电影与剧集，续播位置自动保存" },
-  online: { title: "在线影视", sub: "TVBox 站点跨站搜索，点开即播" },
+  movies: { title: "影视库", sub: "本地电影与剧集，续播位置自动保存" },
+  online: { title: "在线点播", sub: "TVBox 站点跨站搜索，点开即播" },
   live: { title: "直播", sub: "IPTV 频道，按分组浏览" },
   shorts: { title: "短剧", sub: "竖屏内容，播完自动接下一集" },
   music: { title: "音乐", sub: "专辑与无损曲库" },
@@ -37,11 +37,10 @@ const TITLES: Record<View, { title: string; sub: string }> = {
 };
 
 type Playing = {
-  kind: "video" | "audio" | "live";
+  kind: "video" | "audio" | "live" | "online";
   title: string;
   itemId?: number;
-  url?: string;
-  remote?: boolean;
+  online?: OnlinePlayback;
 };
 
 function initialRoute(): { view: View; series: number | null } {
@@ -62,6 +61,8 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [query, setQuery] = useState("");
   const [toastMsg, setToastMsg] = useState("");
+  const [urlOpen, setUrlOpen] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
   const [sourceStamp, setSourceStamp] = useState(0);
   const toastTimer = useRef(0);
   const statusBusy = useRef(false);
@@ -111,13 +112,67 @@ export default function App() {
           name: ch.name,
           headers: ch.headers ?? "",
         });
-        setPlaying({ kind: "live", title: ch.name, url: ch.url });
+        setPlaying({ kind: "live", title: ch.name });
       } catch (e) {
         toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
       }
     },
     [toast]
   );
+
+  /** 打开在线点播的某一集：站点线路走解析，site 为空时按直链处理。 */
+  const openEpisode = useCallback(
+    async (online: OnlinePlayback, index: number): Promise<boolean> => {
+      const ep = online.episodes[index];
+      if (!ep) return false;
+      try {
+        if (online.site) {
+          await api.vodOpen({ site: online.site, url: ep.url, flag: online.flag });
+        } else {
+          await api.openUrl({ url: ep.url });
+        }
+        const next = { ...online, index };
+        setPlaying({
+          kind: "online",
+          title: ep.name ? `${online.title} · ${ep.name}` : online.title,
+          online: next,
+        });
+        return true;
+      } catch (e) {
+        toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
+        return false;
+      }
+    },
+    [toast]
+  );
+
+  const playOnline = useCallback(
+    (p: OnlinePlayback) => openEpisode(p, p.index),
+    [openEpisode]
+  );
+
+  const playDirectUrl = useCallback(async () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    try {
+      await api.openUrl({ url });
+      setPlaying({
+        kind: "online",
+        title: url,
+        online: {
+          title: url,
+          site: "",
+          flag: "",
+          episodes: [{ name: "在线播放", url }],
+          index: 0,
+        },
+      });
+      setUrlOpen(false);
+      setUrlInput("");
+    } catch (e) {
+      toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [urlInput, toast]);
 
   const go = (v: View) => {
     setView(v);
@@ -141,7 +196,7 @@ export default function App() {
           </div>
           <div className="brand-text">
             <div className="brand-name">X-Video</div>
-            <div className="brand-sub">media player</div>
+            <div className="brand-sub">桌面视频播放器</div>
           </div>
         </div>
 
@@ -201,6 +256,13 @@ export default function App() {
           <button className="icon-btn" onClick={loadStatus} title="刷新状态">
             <Icon name="refresh" />
           </button>
+          <button
+            className="icon-btn"
+            onClick={() => setUrlOpen(true)}
+            title="打开网络链接"
+          >
+            <Icon name="link" />
+          </button>
           <button className="icon-btn" onClick={() => go("files")} title="添加媒体目录">
             <Icon name="plus" />
           </button>
@@ -220,7 +282,7 @@ export default function App() {
             <Online
               toast={toast}
               onGoSources={() => go("sources")}
-              onPlay={(title) => setPlaying({ kind: "video", title, remote: true })}
+              onPlay={playOnline}
             />
           ) : view === "live" ? (
             <Live
@@ -256,15 +318,47 @@ export default function App() {
       {playing && (
         <PlayerScreen
           itemId={playing.itemId}
-          url={playing.url}
           title={playing.title}
           kind={playing.kind}
-          remote={playing.remote}
+          online={playing.online}
+          onPlayOnline={openEpisode}
           onClose={() => {
             setPlaying(null);
             loadStatus();
           }}
         />
+      )}
+
+      {urlOpen && (
+        <div className="sheet-mask" onClick={() => setUrlOpen(false)}>
+          <div className="sheet url-sheet" onClick={(e) => e.stopPropagation()}>
+            <button className="sheet-close" onClick={() => setUrlOpen(false)}>
+              <Icon name="close" size={16} />
+            </button>
+            <h2>打开网络链接</h2>
+            <p className="hint">
+              支持 HTTP(S) 直链、HLS（m3u8）、RTSP 等地址，使用内置播放内核直接播放。
+            </p>
+            <div className="url-row">
+              <input
+                className="input"
+                autoFocus
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && playDirectUrl()}
+                placeholder="https://example.com/video.m3u8"
+                spellCheck={false}
+              />
+              <button
+                className="btn-primary"
+                disabled={!urlInput.trim()}
+                onClick={playDirectUrl}
+              >
+                播放
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {toastMsg && <div className="toast">{toastMsg}</div>}

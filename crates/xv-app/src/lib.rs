@@ -323,13 +323,13 @@ impl App {
         Ok(())
     }
 
-    /// 播放一个网络地址（直播频道 / 在线影视）。不进入本地队列。
+    /// 播放一个网络地址（直播频道 / 在线影视 / 直链）。不进入本地队列。
     pub fn play_url(&self, url: &str, headers: &str) -> Result<()> {
         self.play_candidates(&[url.to_string()], headers)
             .map(|_| ())
     }
 
-    /// 按顺序尝试多个直播地址：每个地址等它真正出画面（FILE_LOADED）或报错，
+    /// 按顺序尝试多个在线地址：每个地址等它真正出画面（FILE_LOADED）或报错，
     /// 失败自动切下一个。IPTV 的「频道名,url1#url2#url3」多源就是为这个准备的。
     /// 返回成功命中的候选下标。
     pub fn play_candidates(&self, urls: &[String], headers: &str) -> Result<usize> {
@@ -384,7 +384,7 @@ impl App {
             Some(raws.join("\n\n"))
         };
         let summary = format!(
-            "试了 {} 个直播地址都无法播放。最后失败原因：{}",
+            "试了 {} 个在线地址都无法播放。最后失败原因：{}",
             cands.len(),
             fails.last().cloned().unwrap_or_default()
         );

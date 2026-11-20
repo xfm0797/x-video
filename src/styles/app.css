@@ -2086,3 +2086,28 @@ input {
   background: linear-gradient(135deg, #ff6b6b, #ff9257);
   vertical-align: middle;
 }
+
+/* 打开网络链接 */
+.url-sheet {
+  width: min(560px, 100%);
+}
+.url-sheet h2 {
+  margin: 4px 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.url-sheet .hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--dim);
+}
+.url-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.url-row .input {
+  flex: 1;
+  height: 40px;
+}

@@ -628,31 +628,31 @@ fn event_loop(inner: Arc<Inner>, state: Arc<Mutex<State>>, stop: Arc<AtomicBool>
     }
 }
 
-/// 把 mpv 失败时的日志归因成人话。IPTV 场景里绝大多数失败是网络/防盗链，
+/// 把 mpv 失败时的日志归因成人话。网络播放场景里绝大多数失败是网络/防盗链，
 /// 而不是真的编码不支持——旧版一律显示「格式或编码不受支持」误导性太强。
 fn friendly_play_error(detail: &str, code: i32, mpv_err: &str) -> String {
     let d = detail.to_lowercase();
     if d.contains("timed out") || d.contains("timeout") || d.contains("operation timed out") {
-        return "连接超时：直播源不可达（源已下线，或当前网络无法访问它）".into();
+        return "连接超时：在线地址不可达（源已下线，或当前网络无法访问它）".into();
     }
     if d.contains("connection refused") || d.contains("connection reset") {
-        return "连接被服务器拒绝：直播源可能已下线".into();
+        return "连接被服务器拒绝：在线地址可能已下线".into();
     }
     if d.contains("could not resolve") || d.contains("name or service not known") || d.contains("no address") {
-        return "域名解析失败：直播源域名无效".into();
+        return "域名解析失败：在线地址域名无效".into();
     }
     if d.contains("403") || d.contains("forbidden") || d.contains("authentication") {
         return "服务器拒绝访问（403）：可能需要特定 User-Agent / Referer，或该网络被限制".into();
     }
     if d.contains("404") || d.contains("not found") {
-        return "直播地址已失效（404）".into();
+        return "在线地址已失效（404）".into();
     }
     if d.contains("unsupported") || d.contains("unknown format") || d.contains("codec") || d.contains("decoder") {
-        return "文件无法播放（格式或编码不受支持）".into();
+        return "无法播放（格式或编码不受支持）".into();
     }
     if code != 0 {
         // 带上 mpv 自己的错误码文案，至少不是一句含糊的「不支持」
         return format!("播放失败：{mpv_err}");
     }
-    "播放失败：直播源无法打开".into()
+    "播放失败：在线地址无法打开".into()
 }
