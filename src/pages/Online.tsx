@@ -9,6 +9,28 @@ type Props = {
   toast: (msg: string) => void;
 };
 
+const HISTORY_KEY = "xv.vod.search.history";
+const HISTORY_MAX = 8;
+
+function loadHistory(): string[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(arr)
+      ? arr.filter((x): x is string => typeof x === "string").slice(0, HISTORY_MAX)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(list: string[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  } catch {
+    // 隐私模式等场景写入失败时静默忽略
+  }
+}
+
 export function Online({ onPlay, onGoSources, toast }: Props) {
   // 支持 `?q=片名` 直达（方便截图与外部唤起）
   const bootQuery = new URLSearchParams(window.location.search).get("q") ?? "";
@@ -19,6 +41,7 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
   const [failed, setFailed] = useState<{ site: string; error: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [history, setHistory] = useState<string[]>(() => loadHistory());
   const [detail, setDetail] = useState<{ d: VodDetail; site: string } | null>(null);
   const [srcIdx, setSrcIdx] = useState(0);
   // 当前线路各集的已看进度（url -> { position, duration }），用于在剧集格上画进度条
@@ -45,6 +68,11 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
       const r = await api.vodSearch(q, site || undefined);
       setHits(r.hits);
       setFailed(r.failed);
+      setHistory((prev) => {
+        const next = [q, ...prev.filter((x) => x !== q)].slice(0, HISTORY_MAX);
+        saveHistory(next);
+        return next;
+      });
       if (!r.hits.length && r.failed.length) {
         toast(r.failed[0].error);
       }
@@ -221,6 +249,35 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
             ))}
           </div>
         </>
+      )}
+
+      {!loading && !searched && history.length > 0 && (
+        <div className="chips" style={{ marginTop: 6 }}>
+          <span className="hint dim" style={{ marginRight: 2 }}>
+            最近搜索
+          </span>
+          {history.map((h) => (
+            <button
+              key={h}
+              className="chip"
+              onClick={() => {
+                setKw(h);
+                doSearch(h);
+              }}
+            >
+              {h}
+            </button>
+          ))}
+          <button
+            className="chip"
+            onClick={() => {
+              setHistory([]);
+              saveHistory([]);
+            }}
+          >
+            清除
+          </button>
+        </div>
       )}
 
       {!loading && !searched && (
