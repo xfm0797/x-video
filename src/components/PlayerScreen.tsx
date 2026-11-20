@@ -20,6 +20,7 @@ export function PlayerScreen({ itemId, title, kind, online, onPlayOnline, onClos
   const [st, setSt] = useState<PlaybackState | null>(null);
   const [queue, setQueue] = useState<Item[]>([]);
   const [drag, setDrag] = useState<number | null>(null);
+  const [hover, setHover] = useState<{ pct: number; time: number } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [fs, setFs] = useState(false);
   const surfRef = useRef<HTMLDivElement | null>(null);
@@ -445,18 +446,33 @@ export function PlayerScreen({ itemId, title, kind, online, onPlayOnline, onClos
             onPointerDown={(e) => {
               const el = e.currentTarget;
               el.setPointerCapture(e.pointerId);
+              setHover(null);
               setDrag(seekTo(e.clientX, el));
             }}
             onPointerMove={(e) => {
-              if (drag == null) return;
-              setDrag(seekTo(e.clientX, e.currentTarget));
+              if (drag != null) {
+                setDrag(seekTo(e.clientX, e.currentTarget));
+                return;
+              }
+              // 悬停预览：提示松手后会跳到的位置。
+              const t = seekTo(e.clientX, e.currentTarget);
+              setHover({
+                pct: dur > 0 ? Math.min(100, Math.max(0, (t / dur) * 100)) : 0,
+                time: t,
+              });
             }}
+            onPointerLeave={() => setHover(null)}
             onPointerUp={(e) => {
               if (drag == null) return;
               api.cmd("seek", { value: seekTo(e.clientX, e.currentTarget) });
               setDrag(null);
             }}
           >
+            {hover && (
+              <span className="track-tip" style={{ left: `${hover.pct}%` }}>
+                {fmtTime(hover.time)}
+              </span>
+            )}
             <div className="track-rail">
               <div className="track-fill" style={{ width: `${pct}%` }} />
             </div>
