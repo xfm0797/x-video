@@ -51,3 +51,24 @@ export function PosterCard({ series, kind, onOpen }: Props) {
     </button>
   );
 }
+
+/** 网格加载占位：复用卡片的尺寸与 .skel 微光动画。 */
+export function SkeletonCards({
+  count = 12,
+  kind = "movies",
+}: {
+  count?: number;
+  kind?: "movies" | "shorts" | "music";
+}) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <div className={`card ${kind}`} key={i} aria-hidden="true">
+          <div className="card-pic skel" />
+          <div className="skel-line" style={{ width: "72%" }} />
+          <div className="skel-line" style={{ width: "46%" }} />
+        </div>
+      ))}
+    </>
+  );
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Series } from "../lib/api";
-import { PosterCard } from "../components/PosterCard";
+import { PosterCard, SkeletonCards } from "../components/PosterCard";
 
 type Props = {
   query: string;
@@ -30,7 +30,12 @@ export function Music({ query, onOpenSeries }: Props) {
     };
   }, [query]);
 
-  if (loading && rows.length === 0) return <div className="empty">正在读取…</div>;
+  if (loading && rows.length === 0)
+    return (
+      <div className="grid music">
+        <SkeletonCards count={12} kind="music" />
+      </div>
+    );
 
   if (rows.length === 0)
     return (

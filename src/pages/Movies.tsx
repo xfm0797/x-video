@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, art, type ContinueRow, type Series, type Status } from "../lib/api";
 import { fmtRelative, fmtTime, progressPct } from "../lib/format";
 import { Icon } from "../components/Icon";
-import { PosterCard } from "../components/PosterCard";
+import { PosterCard, SkeletonCards } from "../components/PosterCard";
 
 type Props = {
   status: Status | null;
@@ -172,7 +172,9 @@ export function Movies({ status, query, onOpenSeries, onPlay }: Props) {
         </div>
 
         {loading && rows.length === 0 ? (
-          <div className="empty">正在读取媒体库…</div>
+          <div className="grid movies">
+            <SkeletonCards count={12} kind="movies" />
+          </div>
         ) : rows.length === 0 ? (
           <div className="empty">
             <div className="big">媒体库还是空的</div>
