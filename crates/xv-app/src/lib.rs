@@ -358,12 +358,13 @@ impl App {
     }
 
     /// 带续播键的在线播放；key 为空表示不记忆进度（直播）。
-    pub fn play_url_keyed(&self, url: &str, headers: &str, key: &str) -> Result<()> {
+    /// 返回实际用于续播的起始秒数（0 表示从头开始），便于前端提示用户。
+    pub fn play_url_keyed(&self, url: &str, headers: &str, key: &str) -> Result<f64> {
         // 先落盘当前进度，再查询续播点：重开同一集时能接上最新位置。
         self.flush_online_progress();
         let resume = self.library.online_resume(key).ok().flatten().unwrap_or(0.0);
-        self.play_candidates_inner(&[url.to_string()], headers, resume, key)
-            .map(|_| ())
+        self.play_candidates_inner(&[url.to_string()], headers, resume, key)?;
+        Ok(resume)
     }
 
     /// 按顺序尝试多个在线地址：每个地址等它真正出画面（FILE_LOADED）或报错，

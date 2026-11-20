@@ -21,8 +21,8 @@ export function Live({ onPlay, onGoSources, toast }: Props) {
   const load = useCallback(async () => {
     try {
       const [l, s] = await Promise.all([api.live(), api.sources()]);
-      setGroups(l.groups);
-      setSubs(s.items);
+      setGroups(l.groups ?? []);
+      setSubs(s.items ?? []);
     } catch (e) {
       toast(`频道加载失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {

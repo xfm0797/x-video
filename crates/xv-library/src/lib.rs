@@ -7,11 +7,12 @@
 
 pub mod scan;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, params_from_iter, Connection, Row};
 use serde::Serialize;
 
 pub use scan::{scan_path, ScanReport};
@@ -451,6 +452,40 @@ impl Library {
         })
     }
 
+    /// 批量查询可续播位置，返回 `key -> (position, duration)`。用于在剧集列表上
+    /// 标记已看进度，避免逐集单独查库。
+    pub fn online_resume_batch(&self, keys: &[String]) -> Result<HashMap<String, (f64, f64)>> {
+        let keys: Vec<&str> = keys
+            .iter()
+            .map(|k| k.trim())
+            .filter(|k| !k.is_empty())
+            .collect();
+        let mut out = HashMap::new();
+        if keys.is_empty() {
+            return Ok(out);
+        }
+        let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT key, position, duration, finished FROM online_progress WHERE key IN ({placeholders})"
+        ))?;
+        let rows = stmt.query_map(params_from_iter(keys.iter()), |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, f64>(1)?,
+                r.get::<_, f64>(2)?,
+                r.get::<_, i64>(3)? != 0,
+            ))
+        })?;
+        for row in rows {
+            let (key, pos, dur, finished) = row?;
+            if !finished && dur > 0.0 && pos > 5.0 && pos < dur * 0.97 {
+                out.insert(key, (pos, dur));
+            }
+        }
+        Ok(out)
+    }
+
     // ---------- 设置 ----------
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
@@ -593,5 +628,16 @@ mod tests {
         // 直播 / 未知时长不记忆
         lib.save_online_progress("live", 30.0, 0.0).unwrap();
         assert_eq!(lib.online_resume("live").unwrap(), None);
+
+        // 批量查询：只返回可续播条目，已看完/缺失的不出现
+        let k2 = "https://example.com/b.m3u8";
+        lib.save_online_progress(key, 40.0, 100.0).unwrap();
+        lib.save_online_progress(k2, 50.0, 120.0).unwrap();
+        let map = lib
+            .online_resume_batch(&[key.to_string(), k2.to_string(), "missing".to_string()])
+            .unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get(key).unwrap().0, 40.0);
+        assert_eq!(map.get(k2).unwrap().0, 50.0);
     }
 }

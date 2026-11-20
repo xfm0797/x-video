@@ -275,7 +275,7 @@ export const api = {
   open: (body: { item_id?: number; path?: string; start?: number }) =>
     post<{ ok: boolean }>("/api/player/open", body),
   openUrl: (body: { url: string; headers?: string }) =>
-    post<{ ok: boolean }>("/api/player/open_url", body, 60_000),
+    post<{ ok: boolean; resume: number }>("/api/player/open_url", body, 60_000),
   cmd: (cmd: string, opts: { value?: number; text?: string; id?: number } = {}) =>
     post<{ ok: boolean }>("/api/player/cmd", { cmd, ...opts }),
   rect: (r: { x: number; y: number; w: number; h: number; visible: boolean }) =>
@@ -321,7 +321,12 @@ export const api = {
       40_000
     ),
   vodOpen: (body: { site: string; url: string; flag: string }) =>
-    post<{ ok: boolean; url: string }>("/api/vod/open", body, 40_000),
+    post<{ ok: boolean; url: string; resume: number }>("/api/vod/open", body, 40_000),
+  onlineProgress: (items: { site: string; flag: string; url: string }[]) =>
+    post<{ items: { url: string; position: number; duration: number }[] }>(
+      "/api/vod/online_progress",
+      { items }
+    ),
 };
 
 export const art = (kind: "item" | "series", id: number) => `/api/artwork/${kind}/${id}`;

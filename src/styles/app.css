@@ -2073,6 +2073,9 @@ input {
   opacity: 0.6;
   cursor: progress;
 }
+.ep.watched {
+  border-color: rgba(70, 211, 189, 0.55);
+}
 
 .live-pill {
   display: inline-block;

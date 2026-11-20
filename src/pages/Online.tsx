@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type OnlinePlayback, type VodDetail, type VodHit, type VodSite } from "../lib/api";
+import { fmtTime, progressPct } from "../lib/format";
 import { Icon } from "../components/Icon";
 
 type Props = {
@@ -20,6 +21,10 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
   const [searched, setSearched] = useState(false);
   const [detail, setDetail] = useState<{ d: VodDetail; site: string } | null>(null);
   const [srcIdx, setSrcIdx] = useState(0);
+  // 当前线路各集的已看进度（url -> { position, duration }），用于在剧集格上画进度条
+  const [progress, setProgress] = useState<Record<string, { position: number; duration: number }>>(
+    {}
+  );
 
   useEffect(() => {
     api
@@ -84,6 +89,33 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
     });
     if (ok) setDetail(null);
   };
+
+  // 详情或线路切换时，批量拉取当前线路各集的已看进度
+  const loadProgress = useCallback(async () => {
+    if (!detail) {
+      setProgress({});
+      return;
+    }
+    const src = detail.d.sources[srcIdx];
+    const eps = src?.episodes ?? [];
+    if (!eps.length) {
+      setProgress({});
+      return;
+    }
+    const items = eps.map((e) => ({ site: detail.site, flag: src?.from ?? "", url: e.url }));
+    try {
+      const r = await api.onlineProgress(items);
+      const map: Record<string, { position: number; duration: number }> = {};
+      for (const it of r.items) map[it.url] = { position: it.position, duration: it.duration };
+      setProgress(map);
+    } catch {
+      setProgress({});
+    }
+  }, [detail, srcIdx]);
+
+  useEffect(() => {
+    loadProgress();
+  }, [loadProgress]);
 
   if (sites.length === 0) {
     return (
@@ -245,15 +277,30 @@ export function Online({ onPlay, onGoSources, toast }: Props) {
             )}
 
             <div className="ep-grid">
-              {episodes.map((ep) => (
-                <button
-                  key={`${ep.name}-${ep.url}`}
-                  className="ep"
-                  onClick={() => playEpisode(ep.url)}
-                >
-                  {ep.name}
-                </button>
-              ))}
+              {episodes.map((ep) => {
+                const p = progress[ep.url];
+                const pct = p ? progressPct(p.position, p.duration) : 0;
+                return (
+                  <button
+                    key={`${ep.name}-${ep.url}`}
+                    className={`ep${p ? " watched" : ""}`}
+                    onClick={() => playEpisode(ep.url)}
+                    title={
+                      p
+                        ? `已看 ${fmtTime(p.position)} / ${fmtTime(p.duration)}，重开将自动续播`
+                        : ep.name
+                    }
+                  >
+                    {ep.name}
+                    {p && <i className="seen" />}
+                    {pct > 0 && (
+                      <span className="prog">
+                        <i style={{ width: `${pct}%` }} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
               {episodes.length === 0 && <div className="empty">这一线路没有剧集</div>}
             </div>
           </div>

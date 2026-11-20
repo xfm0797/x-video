@@ -116,6 +116,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/vod/list", get(sources_api::vod_list))
         .route("/api/vod/detail", get(sources_api::detail))
         .route("/api/vod/open", post(sources_api::open_vod))
+        .route("/api/vod/online_progress", post(sources_api::online_progress))
         .fallback_service(spa)
         .layer(middleware::from_fn_with_state(app.clone(), origin_guard))
         .with_state(app)
@@ -400,11 +401,11 @@ async fn player_open_url(State(app): State<Arc<App>>, Json(req): Json<OpenUrlReq
     let headers = req.headers;
     let key = url.clone();
     let app2 = app.clone();
-    tokio::task::spawn_blocking(move || app2.play_url_keyed(&url, &headers, &key))
+    let resume = tokio::task::spawn_blocking(move || app2.play_url_keyed(&url, &headers, &key))
         .await
         .map_err(|e| ApiError::msg(e.to_string()))??;
     app.player().refresh_tracks();
-    Ok(Json(json!({ "ok": true })))
+    Ok(Json(json!({ "ok": true, "resume": resume })))
 }
 
 #[derive(Deserialize)]

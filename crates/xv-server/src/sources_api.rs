@@ -256,6 +256,16 @@ pub async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQuery>) -
     Ok(Json(json!({ "detail": detail })))
 }
 
+/// 在线播放的稳定续播键：直链用 URL，站点点播用「站点 + 线路 + 剧集页地址」，
+/// 不依赖会过期的解析直链。服务端唯一生成处，前端只传原始字段。
+pub fn online_key(site: &str, flag: &str, url: &str) -> String {
+    if site.trim().is_empty() {
+        url.trim().to_string()
+    } else {
+        format!("vod:{site}:{flag}:{url}")
+    }
+}
+
 #[derive(Deserialize)]
 pub struct OpenVodReq {
     site: String,
@@ -269,19 +279,58 @@ pub async fn open_vod(State(app): State<Arc<App>>, Json(req): Json<OpenVodReq>) 
     if req.site.is_empty() {
         let url = req.url.clone();
         let key = url.clone();
-        tokio::task::spawn_blocking(move || app.play_url_keyed(&url, "", &key))
+        let resume = tokio::task::spawn_blocking(move || app.play_url_keyed(&url, "", &key))
             .await
             .map_err(|e| ApiError::msg(e.to_string()))??;
-        return Ok(Json(json!({ "ok": true, "url": req.url })));
+        return Ok(Json(json!({ "ok": true, "url": req.url, "resume": resume })));
     }
     let (sub, key) = split_site(&req.site)?;
-    // 用「站点 + 线路 + 剧集页地址」做续播键，避免依赖会过期的解析直链。
-    let resume_key = format!("vod:{}:{}:{}", req.site, req.flag, req.url);
+    let resume_key = online_key(&req.site, &req.flag, &req.url);
     let resolved = app.sources.resolve(sub, key, &req.flag, &req.url).await?;
     let headers = xv_source::http::mpv_header_fields(&resolved.headers);
     let url = resolved.url.clone();
-    tokio::task::spawn_blocking(move || app.play_url_keyed(&url, &headers, &resume_key))
+    let resume = tokio::task::spawn_blocking(move || app.play_url_keyed(&url, &headers, &resume_key))
         .await
         .map_err(|e| ApiError::msg(e.to_string()))??;
-    Ok(Json(json!({ "ok": true, "url": resolved.url })))
+    Ok(Json(json!({ "ok": true, "url": resolved.url, "resume": resume })))
+}
+
+#[derive(Deserialize)]
+pub struct OnlineProgressItem {
+    site: String,
+    #[serde(default)]
+    flag: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+pub struct OnlineProgressReq {
+    items: Vec<OnlineProgressItem>,
+}
+
+/// 批量查询剧集已看进度，用于在详情页剧集列表上标记进度条/继续观看。
+pub async fn online_progress(
+    State(app): State<Arc<App>>,
+    Json(req): Json<OnlineProgressReq>,
+) -> ApiResult {
+    let keys: Vec<String> = req
+        .items
+        .iter()
+        .map(|it| online_key(&it.site, &it.flag, &it.url))
+        .collect();
+    let app2 = app.clone();
+    let map = tokio::task::spawn_blocking(move || app2.library.online_resume_batch(&keys))
+        .await
+        .map_err(|e| ApiError::msg(e.to_string()))??;
+    let items: Vec<_> = req
+        .items
+        .iter()
+        .filter_map(|it| {
+            let k = online_key(&it.site, &it.flag, &it.url);
+            map.get(&k).map(|(pos, dur)| {
+                serde_json::json!({ "url": it.url, "position": pos, "duration": dur })
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "items": items })))
 }

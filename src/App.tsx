@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type OnlinePlayback, type Status } from "./lib/api";
+import { fmtTime } from "./lib/format";
 import { Icon, type IconName } from "./components/Icon";
 import { PlayerScreen } from "./components/PlayerScreen";
 import { Movies } from "./pages/Movies";
@@ -79,7 +80,11 @@ export default function App() {
     statusBusy.current = true;
     api
       .status()
-      .then(setStatus)
+      .then((s) => {
+        // 归一化：后端若返回不完整对象（缺 engine），按未就绪处理，
+        // 避免下游 status?.engine.xxx 在 status 为真值但无 engine 时崩溃
+        setStatus(s && s.engine ? s : null);
+      })
       .catch(() => {})
       .finally(() => {
         statusBusy.current = false;
@@ -127,17 +132,16 @@ export default function App() {
       const ep = online.episodes[index];
       if (!ep) return false;
       try {
-        if (online.site) {
-          await api.vodOpen({ site: online.site, url: ep.url, flag: online.flag });
-        } else {
-          await api.openUrl({ url: ep.url });
-        }
+        const r = online.site
+          ? await api.vodOpen({ site: online.site, url: ep.url, flag: online.flag })
+          : await api.openUrl({ url: ep.url });
         const next = { ...online, index };
         setPlaying({
           kind: "online",
           title: ep.name ? `${online.title} · ${ep.name}` : online.title,
           online: next,
         });
+        if (r.resume > 0) toast(`已从 ${fmtTime(r.resume)} 继续播放`);
         return true;
       } catch (e) {
         toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
@@ -158,7 +162,7 @@ export default function App() {
     const ua = urlUa.trim();
     const headers = ua ? `User-Agent: ${ua.replace(/,/g, " ")}` : "";
     try {
-      await api.openUrl({ url, headers });
+      const r = await api.openUrl({ url, headers });
       localStorage.setItem("xv.direct.ua", ua);
       setPlaying({
         kind: "online",
@@ -173,6 +177,7 @@ export default function App() {
       });
       setUrlOpen(false);
       setUrlInput("");
+      if (r.resume > 0) toast(`已从 ${fmtTime(r.resume)} 继续播放`);
     } catch (e) {
       toast(`播放失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -228,9 +233,13 @@ export default function App() {
 
         <div className="side-foot">
           <div className="engine-chip">
-            <i className={`dot ${status ? (status.engine.available ? "ok" : "err") : ""}`} />
+            <i
+              className={`dot ${
+                status?.engine?.available ? "ok" : status?.engine ? "err" : ""
+              }`}
+            />
             <span>
-              {status
+              {status?.engine
                 ? status.engine.available
                   ? "内核就绪 · libmpv"
                   : "内核不可用"
