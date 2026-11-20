@@ -20,6 +20,7 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
   const [series, setSeries] = useState<Series | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [error, setError] = useState("");
+  const [seasonSel, setSeasonSel] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -29,6 +30,7 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
         if (!alive) return;
         setSeries(r.series);
         setItems(r.items);
+        setSeasonSel(null);
       })
       .catch((e) => alive && setError(String(e)));
     return () => {
@@ -41,6 +43,10 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
 
   const isMusic = series.kind === "music";
   const next = items.find((i) => !i.finished && i.position > 0) || items[0];
+  const seasons = Array.from(
+    new Set(items.map((i) => i.season).filter((s): s is number => s != null)),
+  ).sort((a, b) => a - b);
+  const shown = seasonSel == null ? items : items.filter((i) => i.season === seasonSel);
   const play = (it: Item) =>
     onPlay(it.id, `${series.title} · ${epLabel(it)}`, isMusic ? "audio" : "video");
 
@@ -106,10 +112,29 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
         <section className="section">
           <div className="section-head">
             <h2>选集</h2>
-            <span className="count">{items.length} 集</span>
+            <span className="count">{shown.length} 集</span>
           </div>
+          {seasons.length > 1 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <button
+                className={`chip ${seasonSel == null ? "on" : ""}`}
+                onClick={() => setSeasonSel(null)}
+              >
+                全部
+              </button>
+              {seasons.map((s) => (
+                <button
+                  key={s}
+                  className={`chip ${seasonSel === s ? "on" : ""}`}
+                  onClick={() => setSeasonSel(s)}
+                >
+                  第 {s} 季
+                </button>
+              ))}
+            </div>
+          )}
           <div className="eps">
-            {items.map((it, i) => {
+            {shown.map((it, i) => {
               const pct = progressPct(it.position, it.duration);
               return (
                 <button key={it.id} className="ep" onClick={() => play(it)} title={it.name}>
