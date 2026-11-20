@@ -357,6 +357,45 @@ impl App {
         }
     }
 
+    /// 关闭播放器：先把进度立刻落盘（本地 / 在线），再停止内核并清空会话。
+    /// 避免返回媒体库后仍在后台出声，也避免丢掉最后几秒进度。
+    pub fn stop(&self) -> Result<()> {
+        let item_id = {
+            let s = self.session.lock().unwrap_or_else(|e| e.into_inner());
+            s.item_id
+        };
+        let player = self
+            .player
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .cloned();
+        if let Some(p) = player.as_ref() {
+            if let Some(id) = item_id {
+                let st = p.state();
+                if st.position > 1.0 {
+                    let _ = self.library.save_progress(id, st.position, st.duration);
+                }
+            }
+        }
+        // 在线进度：内部按 online_key 落盘并清除。
+        self.flush_online_progress();
+        let stop_res = match player.as_ref() {
+            Some(p) => p.stop(),
+            None => Ok(()),
+        };
+        if let Ok(mut s) = self.session.lock() {
+            s.item_id = None;
+            s.series_id = None;
+            s.queue.clear();
+            s.index = 0;
+            s.eof_handled = false;
+            s.last_saved = 0.0;
+            s.online_key = None;
+        }
+        stop_res
+    }
+
     /// 带续播键的在线播放；key 为空表示不记忆进度（直播）。
     /// 返回实际用于续播的起始秒数（0 表示从头开始），便于前端提示用户。
     pub fn play_url_keyed(&self, url: &str, headers: &str, key: &str) -> Result<f64> {

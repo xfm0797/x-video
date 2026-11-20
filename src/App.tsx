@@ -336,6 +336,8 @@ export default function App() {
           online={playing.online}
           onPlayOnline={openEpisode}
           onClose={() => {
+            // 关闭即停止：落盘进度后停掉内核，避免返回媒体库后仍在后台出声
+            api.cmd("stop").catch(() => {});
             setPlaying(null);
             loadStatus();
           }}
@@ -371,7 +373,21 @@ export default function App() {
               </button>
             </div>
             <label className="url-field">
-              <span>User-Agent（可选）</span>
+              <span className="url-field-head">
+                User-Agent（可选）
+                {urlUa.trim() && (
+                  <button
+                    type="button"
+                    className="url-clear"
+                    onClick={() => {
+                      setUrlUa("");
+                      localStorage.removeItem("xv.direct.ua");
+                    }}
+                  >
+                    清除
+                  </button>
+                )}
+              </span>
               <input
                 className="input"
                 value={urlUa}
@@ -380,6 +396,11 @@ export default function App() {
                 placeholder="留空使用播放器默认 UA，例如 Mozilla/5.0 ..."
                 spellCheck={false}
               />
+              <span className="url-field-tip">
+                {urlUa.trim()
+                  ? "已设置自定义 UA，播放时会随请求发送"
+                  : "留空则使用播放器默认 UA"}
+              </span>
             </label>
           </div>
         </div>

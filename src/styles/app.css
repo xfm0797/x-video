@@ -2129,3 +2129,27 @@ input {
   height: 38px;
   box-sizing: border-box;
 }
+
+.url-field .url-field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.url-field .url-clear {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: #46d3bd;
+  cursor: pointer;
+}
+
+.url-field .url-clear:hover {
+  text-decoration: underline;
+}
+
+.url-field .url-field-tip {
+  margin-top: 6px;
+  margin-bottom: 0;
+}

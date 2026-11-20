@@ -437,7 +437,7 @@ async fn player_cmd(State(app): State<Arc<App>>, Json(req): Json<CmdReq>) -> Api
         }
         "next" => app.next(false)?,
         "prev" => app.prev()?,
-        "stop" => player.stop()?,
+        "stop" => app.stop()?,
         "audio" => player.set_audio(req.id.unwrap_or(-1))?,
         "sub" => player.set_sub(req.id.unwrap_or(-1))?,
         "sub_add" => player.add_sub(req.text.as_deref().unwrap_or(""))?,
