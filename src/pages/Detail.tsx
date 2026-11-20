@@ -16,6 +16,26 @@ const KIND_LABEL: Record<string, string> = {
   music: "专辑",
 };
 
+const seasonKey = (id: number) => `xv.detail.season.${id}`;
+
+function loadSeason(id: number): number | null {
+  try {
+    const v = Number(localStorage.getItem(seasonKey(id)));
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSeason(id: number, season: number | null) {
+  try {
+    if (season == null) localStorage.removeItem(seasonKey(id));
+    else localStorage.setItem(seasonKey(id), String(season));
+  } catch {
+    // 写入失败不影响使用
+  }
+}
+
 export function Detail({ seriesId, onBack, onPlay }: Props) {
   const [series, setSeries] = useState<Series | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -30,7 +50,9 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
         if (!alive) return;
         setSeries(r.series);
         setItems(r.items);
-        setSeasonSel(null);
+        // 恢复上次选中的季；该季已不存在时回到「全部」。
+        const saved = loadSeason(seriesId);
+        setSeasonSel(saved != null && r.items.some((i) => i.season === saved) ? saved : null);
       })
       .catch((e) => alive && setError(String(e)));
     return () => {
@@ -47,6 +69,10 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
     new Set(items.map((i) => i.season).filter((s): s is number => s != null)),
   ).sort((a, b) => a - b);
   const shown = seasonSel == null ? items : items.filter((i) => i.season === seasonSel);
+  const pickSeason = (s: number | null) => {
+    setSeasonSel(s);
+    saveSeason(seriesId, s);
+  };
   const play = (it: Item) =>
     onPlay(it.id, `${series.title} · ${epLabel(it)}`, isMusic ? "audio" : "video");
 
@@ -118,7 +144,7 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
               <button
                 className={`chip ${seasonSel == null ? "on" : ""}`}
-                onClick={() => setSeasonSel(null)}
+                onClick={() => pickSeason(null)}
               >
                 全部
               </button>
@@ -126,7 +152,7 @@ export function Detail({ seriesId, onBack, onPlay }: Props) {
                 <button
                   key={s}
                   className={`chip ${seasonSel === s ? "on" : ""}`}
-                  onClick={() => setSeasonSel(s)}
+                  onClick={() => pickSeason(s)}
                 >
                   第 {s} 季
                 </button>
