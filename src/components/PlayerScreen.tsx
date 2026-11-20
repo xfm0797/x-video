@@ -60,6 +60,32 @@ export function PlayerScreen({ itemId, title, kind, online, onPlayOnline, onClos
       .catch(() => setQueue([]));
   }, [itemId]);
 
+  // 选集抽屉里的已看进度，与在线详情页保持一致的可视化。
+  const [prog, setProg] = useState<Record<string, { position: number; duration: number }>>({});
+  useEffect(() => {
+    if (!online) {
+      setProg({});
+      return;
+    }
+    let alive = true;
+    api
+      .onlineProgress(
+        online.episodes.map((e) => ({ site: online.site, flag: online.flag, url: e.url }))
+      )
+      .then((r) => {
+        if (!alive) return;
+        const m: Record<string, { position: number; duration: number }> = {};
+        for (const it of r.items) m[it.url] = { position: it.position, duration: it.duration };
+        setProg(m);
+      })
+      .catch(() => {
+        if (alive) setProg({});
+      });
+    return () => {
+      alive = false;
+    };
+  }, [online]);
+
   // 在线点播播完自动接下一集；本地队列由后端 ticker 负责推进。
   useEffect(() => {
     if (!online) return;
@@ -345,29 +371,45 @@ export function PlayerScreen({ itemId, title, kind, online, onPlayOnline, onClos
           </header>
           <div className="list">
             {online
-              ? online.episodes.map((ep, i) => (
-                  <button
-                    key={`${ep.name}-${ep.url}`}
-                    className={`row-item ${i === online.index ? "on" : ""}`}
-                    onClick={() => {
-                      onPlayOnline?.(online, i);
-                      setDrawer(false);
-                    }}
-                  >
-                    <span className="idx">{String(i + 1).padStart(2, "0")}</span>
-                    <span
-                      style={{
-                        flex: 1,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+              ? online.episodes.map((ep, i) => {
+                  const p = prog[ep.url];
+                  const pct = p ? progressPct(p.position, p.duration) : 0;
+                  const active = i === online.index;
+                  return (
+                    <button
+                      key={`${ep.name}-${ep.url}`}
+                      className={`row-item ${active ? "on" : ""}`}
+                      title={
+                        p
+                          ? `已看 ${fmtTime(p.position)} / ${fmtTime(p.duration)}，重开将自动续播`
+                          : ep.name
+                      }
+                      onClick={() => {
+                        onPlayOnline?.(online, i);
+                        setDrawer(false);
                       }}
                     >
-                      {ep.name || `第 ${i + 1} 集`}
-                    </span>
-                    {i === online.index && <Icon name="play" size={13} />}
-                  </button>
-                ))
+                      <span className="idx">{String(i + 1).padStart(2, "0")}</span>
+                      <span
+                        style={{
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {ep.name || `第 ${i + 1} 集`}
+                      </span>
+                      {p && !active && <i className="seen" />}
+                      {pct > 0 && (
+                        <span className="prog">
+                          <i style={{ width: `${pct}%` }} />
+                        </span>
+                      )}
+                      {active && <Icon name="play" size={13} />}
+                    </button>
+                  );
+                })
               : queue.map((it, i) => (
                   <button
                     key={it.id}
